@@ -15,10 +15,14 @@ ADD ./ /opt/pyspider
 
 # run test
 WORKDIR /opt/pyspider
-RUN IGNORE_MYSQL=1 IGNORE_RABBITMQ=1 IGNORE_MONGODB=1 python setup.py test
 
 VOLUME ["/opt/pyspider"]
 
-ENTRYPOINT ["python", "run.py"]
-
 EXPOSE 5000 23333 24444
+
+RUN groupadd -r pyspider && useradd -r -g pyspider -d /opt/pyspider \
+    -s /sbin/nologin pyspider
+RUN chown -R pyspider:pyspider /opt/pyspider
+
+USER pyspider
+ENTRYPOINT ["python", "run.py"]
