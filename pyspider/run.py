@@ -8,6 +8,7 @@
 
 import os
 import six
+import copy
 import time
 import shutil
 import logging
@@ -24,7 +25,13 @@ def read_config(ctx, param, value):
     if not value:
         return {}
     import json
-    config = json.load(value)
+
+    def underline_dict(d):
+        if not isinstance(d, dict):
+            return d
+        return dict((k.replace('-', '_'), underline_dict(v)) for k, v in six.iteritems(d))
+
+    config = underline_dict(json.load(value))
     ctx.default_map = config
     return config
 
@@ -196,7 +203,7 @@ def fetcher(ctx, xmlrpc, xmlrpc_host, xmlrpc_port, poolsize, proxy, user_agent,
     if user_agent:
         fetcher.user_agent = user_agent
     if timeout:
-        fetcher.default_options = dict(fetcher.default_options)
+        fetcher.default_options = copy.deepcopy(fetcher.default_options)
         fetcher.default_options['timeout'] = timeout
 
     g.instances.append(fetcher)
