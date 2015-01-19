@@ -73,7 +73,7 @@ class ProjectManager(object):
             return True
         if updatetime and updatetime > self.projects[project_name]['info'].get('updatetime', 0):
             return True
-        if time.time() - self.projects[project_name]['load_time'] < self.RELOAD_PROJECT_INTERVAL:
+        if time.time() - self.projects[project_name]['load_time'] > self.RELOAD_PROJECT_INTERVAL:
             return True
         return False
 
@@ -100,8 +100,9 @@ class ProjectManager(object):
             ret = self.build_module(project, self.env)
             self.projects[project['name']] = ret
         except Exception:
-            logger.exception("load project %s error" % project.get('name', None))
+            logger.exception("load project %s error", project.get('name', None))
             return False
+        logger.debug('project: %s updated.', project.get('name', None))
         return True
 
     def get(self, project_name, updatetime=None):
@@ -150,16 +151,17 @@ class ProjectLoader(object):
         else:
             mod = self.mod
 
+        mod.__file__ = '<%s>' % self.name
+        mod.__loader__ = self
+        mod.__project__ = self.project
+        mod.__package__ = ''
+        # logger inject
         log_buffer = []
         mod.logging = mod.logger = logging.Logger(self.name)
         handler = SaveLogHandler(log_buffer)
         handler.setFormatter(LogFormatter(color=False))
         mod.logger.addHandler(handler)
         mod.log_buffer = log_buffer
-        mod.__file__ = '<%s>' % self.name
-        mod.__loader__ = self
-        mod.__project__ = self.project
-        mod.__package__ = ''
 
         code = self.get_code(fullname)
         six.exec_(code, mod.__dict__)

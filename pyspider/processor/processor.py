@@ -6,7 +6,6 @@
 # Created on 2014-02-16 22:59:56
 
 import sys
-import six
 import time
 import logging
 logger = logging.getLogger("processor")
@@ -69,7 +68,7 @@ class Processor(object):
             if not project_data:
                 logger.error("no such project: %s", project)
                 return False
-            ret = project_data['instance'].run(
+            ret = project_data['instance'].run_task(
                 project_data['module'], task, response)
         except Exception as e:
             logger.exception(e)
@@ -138,7 +137,7 @@ class Processor(object):
                 'save': (task['project'], msg),
             }))
 
-        if response.error or ret.exception:
+        if ret.exception:
             logger_func = logger.error
         else:
             logger_func = logger.info

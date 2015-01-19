@@ -5,8 +5,10 @@
 #         http://binux.me
 # Created on 2014-02-22 14:02:21
 
-from libs.base_handler import BaseHandler, catch_status_code_error, every
+from pyspider.libs.base_handler import BaseHandler, catch_status_code_error, every
 
+class IgnoreHandler(object):
+    pass
 
 class TestHandler(BaseHandler):
 
@@ -43,3 +45,7 @@ class TestHandler(BaseHandler):
     @every(seconds=10)
     def on_cronjob2(self, response):
         logger.info('on_cronjob2')
+
+    def generator(self, response):
+        yield "a"
+        yield "b"
