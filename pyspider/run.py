@@ -70,8 +70,9 @@ def connect_rpc(ctx, param, value):
               help='database url for projectdb, default: sqlite')
 @click.option('--resultdb', envvar='RESULTDB', callback=connect_db,
               help='database url for resultdb, default: sqlite')
-@click.option('--amqp-url', help='amqp url for rabbitmq, default: built-in Queue')
-@click.option('--phantomjs-proxy', help="phantomjs proxy ip:port")
+@click.option('--amqp-url', envvar='AMQP_URL',
+              help='amqp url for rabbitmq, default: built-in Queue')
+@click.option('--phantomjs-proxy', envvar='PHANTOMJS_PROXY', help="phantomjs proxy ip:port")
 @click.option('--data-path', default='./data', help='data dir path')
 @click.version_option(version=pyspider.__version__, prog_name=pyspider.__name__)
 @click.pass_context
@@ -388,6 +389,7 @@ def all(ctx, fetcher_num, processor_num, result_worker_num, run_in):
     ctx.obj['debug'] = False
     g = ctx.obj
 
+    # FIXME: py34 cannot run components with threads
     if run_in == 'subprocess' and os.name != 'nt':
         run_in = utils.run_in_subprocess
     else:
@@ -566,15 +568,6 @@ def one(ctx, interactive, enable_phantomjs, scripts):
     """
     One mode not only means all-in-one, it runs every thing in one process over
     tornado.ioloop, for debug purpose
-
-    * webui is not running in one mode.
-    * SCRIPTS is the script file path of project
-        - when set, taskdb and resultdb will use a in-memery sqlite db by default
-        - when set, on_start callback will be triggered on start
-    * the status of project is always RUNNING.
-    * rate and burst can be set in script with comments like:
-        # rate: 1.0
-        # burst: 3
     """
 
     ctx.obj['debug'] = False
@@ -587,7 +580,7 @@ def one(ctx, interactive, enable_phantomjs, scripts):
         if g.get('is_taskdb_default'):
             g['taskdb'] = connect_database('sqlite+taskdb://')
         if g.get('is_resultdb_default'):
-            g['resultdb'] = connect_database('sqlite+resultdb://')
+            g['resultdb'] = None
 
     if enable_phantomjs:
         phantomjs_config = g.config.get('phantomjs', {})
@@ -598,6 +591,9 @@ def one(ctx, interactive, enable_phantomjs, scripts):
         phantomjs_obj = None
 
     result_worker_config = g.config.get('result_worker', {})
+    if g.resultdb is None:
+        result_worker_config.setdefault('result_cls',
+                                        'pyspider.result.OneResultWorker')
     result_worker_obj = ctx.invoke(result_worker, **result_worker_config)
 
     processor_config = g.config.get('processor', {})
@@ -610,7 +606,7 @@ def one(ctx, interactive, enable_phantomjs, scripts):
     scheduler_config = g.config.get('scheduler', {})
     scheduler_config.setdefault('xmlrpc', False)
     scheduler_config.setdefault('scheduler_cls',
-                                'pyspider.scheduler.scheduler.OneScheduler')
+                                'pyspider.scheduler.OneScheduler')
     scheduler_obj = ctx.invoke(scheduler, **scheduler_config)
 
     scheduler_obj.init_one(ioloop=fetcher_obj.ioloop,
@@ -621,13 +617,13 @@ def one(ctx, interactive, enable_phantomjs, scripts):
     if scripts:
         for project in g.projectdb.projects:
             scheduler_obj.trigger_on_start(project)
+
     try:
         scheduler_obj.run()
-    except KeyboardInterrupt:
+    finally:
         scheduler_obj.quit()
         if phantomjs_obj:
             phantomjs_obj.quit()
-        raise
 
 
 def main():

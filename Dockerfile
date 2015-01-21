@@ -13,6 +13,9 @@ RUN pip install --allow-all-external -r /opt/pyspider/requirements.txt
 # add all repo
 ADD ./ /opt/pyspider
 WORKDIR /opt/pyspider
+
+RUN pip install .
+
 VOLUME ["/opt/pyspider"]
 
 EXPOSE 5000 23333 24444
@@ -22,4 +25,4 @@ RUN groupadd -r pyspider && useradd -r -g pyspider -d /opt/pyspider \
 RUN chown -R pyspider:pyspider /opt/pyspider
 
 USER pyspider
-ENTRYPOINT ["python", "run.py", "--data-path", "/tmp/"]
+ENTRYPOINT ["pyspider"]
