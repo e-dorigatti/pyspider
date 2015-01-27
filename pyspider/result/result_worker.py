@@ -8,7 +8,11 @@
 import time
 import json
 import logging
+import hashlib
+import itertools
 from six.moves import queue as Queue
+from pyspider.libs.utils import utf8
+
 logger = logging.getLogger("result")
 
 
@@ -85,3 +89,95 @@ class OneResultWorker(ResultWorker):
         else:
             logger.warning('result UNKNOW -> %.30r' % result)
             return
+
+
+class TimestampedResultWorker(ResultWorker):
+    """ ResultWorker that keeps track of useful timestamps inside the
+    items stored in ResultDB. More specifically:
+    1) created: when was the item first scraped?
+    2) modified: when was the item last modified (with at least one item value changed)?
+    3) visited: when was the item last scraped (with or without changes)?
+    """
+    CREATED_FIELD_NAME = '_created'
+    MODIFIED_FIELD_NAME = '_modified'
+    VISITED_FIELD_NAME = '_visited'
+
+    def on_result(self, task, result):
+        if 'taskid' in task and 'project' in task:
+            project = task['project']
+            taskid = task['taskid']
+
+            visited = time.time()
+            created = visited
+            modified = visited
+
+            old_result = self.resultdb.get(project, taskid)
+            if old_result:
+                created = old_result.get(self.CREATED_FIELD_NAME)  # if not there, leave it empty as we don't know when this item was first created
+                if self._objs_differ(result, old_result):
+                    modified = visited
+
+            result[self.CREATED_FIELD_NAME] = created
+            result[self.MODIFIED_FIELD_NAME] = modified
+            result[self.VISITED_FIELD_NAME] = visited
+
+        return super(TimestampedResultWorker, self).on_result(task, result)
+
+    @classmethod
+    def _objs_differ(cls, obj1, obj2):
+        for key in itertools.chain(obj1.keys(), obj2.keys()):
+            if key == cls.CREATED_FIELD_NAME \
+                    or key == cls.MODIFIED_FIELD_NAME \
+                    or key == cls.VISITED_FIELD_NAME:
+                continue
+            if key not in obj1 or key not in obj2 or obj1[key] != obj2[key]:
+                return False
+        return True
+
+
+class CustomPKResultWorker(ResultWorker):
+    """ ResultWorker that allows to store items based on their own
+    primary keys, therefore allowing:
+    1) multiple items returned from the same task;
+    2) an item to be returned from different tasks.
+    For this to work, each item should define its own 'pk' field, which
+    will be removed from the item itself before being stored in the resultdb.
+
+    Please notice that this will break the pyspider UI, as this will override
+    the taskid right before storing the result in the database, and therefore
+    won't be retrieved by taskid; this is expected, as after this changes
+    a one-to-one relationship between tasks and items is replaced in favor of a
+    many-to-one.
+    """
+    PK_FIELD_NAME = 'pk'
+
+    def on_result(self, task, result):
+        if result and self.PK_FIELD_NAME in result:
+            task['taskid'] = self._deep_hash(result.pop(self.PK_FIELD_NAME))
+        return super(CustomPKResultWorker, self).on_result(task, result)
+
+    @staticmethod
+    def _deep_hash(something):
+        if isinstance(something, (list, tuple)):
+            key = u', '.join(
+                CustomPKResultWorker._deep_hash(x)
+                for x in something
+            )
+        elif isinstance(something, set):
+            key = u', '.join(
+                CustomPKResultWorker._deep_hash(x)
+                for x in sorted(something)
+            )
+        elif isinstance(something, dict):
+            key = u', '.join(
+                u'{}:{}'.format(k, CustomPKResultWorker._deep_hash(v))
+                for k, v in sorted(something.iteritems())
+            )
+        else:
+            key = u'{}'.format(something)
+        return hashlib.sha1(utf8(key)).hexdigest()
+
+
+class TimestampedCustomPKResultWorker(CustomPKResultWorker,
+                                      TimestampedResultWorker):
+    pass
