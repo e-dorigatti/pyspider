@@ -153,6 +153,10 @@ class CustomPKResultWorker(ResultWorker):
     PK_FIELD_NAME = 'pk'
 
     def on_result(self, task, result):
+        if isinstance(result, list):
+            success = [self.on_result(task, item) for item in result]
+            return all(success)
+
         if result and self.PK_FIELD_NAME in result:
             task['taskid'] = self._deep_hash(result.pop(self.PK_FIELD_NAME))
         return super(CustomPKResultWorker, self).on_result(task, result)
