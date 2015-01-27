@@ -111,8 +111,9 @@ class TimestampedResultWorker(ResultWorker):
             created = visited
             modified = visited
 
-            old_result = self.resultdb.get(project, taskid)
-            if old_result:
+            old_result_tuple = self.resultdb.get(project, taskid)
+            if old_result_tuple:
+                old_result = old_result_tuple['result']
                 created = old_result.get(self.CREATED_FIELD_NAME)  # if not there, leave it empty as we don't know when this item was first created
                 if self._objs_differ(result, old_result):
                     modified = visited
