@@ -101,7 +101,9 @@ def dump_result(project, _format):
         return Response(generator(), mimetype='text/plain')
     elif _format == 'csv':
         def toString(obj):
-            if isinstance(obj, six.binary_type):
+            if obj is None:
+                return ""
+            elif isinstance(obj, six.binary_type):
                 if six.PY2:
                     return obj
                 else:
