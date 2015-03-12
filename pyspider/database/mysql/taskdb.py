@@ -42,7 +42,7 @@ class TaskDB(MySQLMixin, SplitTableMixin, BaseTaskDB, BaseDB):
             `url` varchar(1024),
             `status` int(1),
             `schedule` BLOB,
-            `fetch` BLOB,
+            `fetch` MEDIUMBLOB,
             `process` BLOB,
             `track` BLOB,
             `lastcrawltime` double(16, 4),
