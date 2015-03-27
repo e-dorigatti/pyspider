@@ -26,8 +26,15 @@ def task(taskid):
     if resultdb:
         result = resultdb.get(project, taskid)
 
-    return render_template("task.html", task=task, json=json, result=result,
-                           status_to_string=app.config['taskdb'].status_to_string)
+    if request.args.get('format', '') == 'json':
+        table = taskdb._tablename(project)
+        after = [x for x in taskdb._select(table, 'count(*)',
+                 'lastcrawltime > %f' % task['lastcrawltime'])]
+        task['tasks_after'] = after[0][0]
+        return json.jsonify(task)
+    else:
+        return render_template("task.html", task=task, json=json, result=result,
+                               status_to_string=app.config['taskdb'].status_to_string)
 
 
 @app.route('/tasks')
