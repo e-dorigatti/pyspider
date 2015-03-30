@@ -47,7 +47,7 @@ class TaskDB(MySQLMixin, SplitTableMixin, BaseTaskDB, BaseDB):
             `track` BLOB,
             `lastcrawltime` double(16, 4),
             `updatetime` double(16, 4),
-            INDEX `status_index` (`status`)
+            INDEX `status_index` (`status`),
             INDEX `lct_indes` (`lastcrawltime`)
             ) ENGINE=MyISAM CHARSET=utf8''' % self.escape(tablename))
 
