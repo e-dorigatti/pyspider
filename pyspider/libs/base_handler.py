@@ -163,7 +163,7 @@ class BaseHandler(object):
     _cron_jobs = []
     _min_tick = 0
     __env__ = {'not_inited': True}
-    crawl_frequency = 0  # minutes
+    crawl_frequency = 0  # seconds
 
     def _reset(self):
         """
