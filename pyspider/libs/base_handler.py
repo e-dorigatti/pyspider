@@ -163,6 +163,7 @@ class BaseHandler(object):
     _cron_jobs = []
     _min_tick = 0
     __env__ = {'not_inited': True}
+    crawl_frequency = 0  # minutes
 
     def _reset(self):
         """
@@ -406,4 +407,5 @@ class BaseHandler(object):
         for each in response.save:
             if each == 'min_tick':
                 result[each] = self._min_tick
+        result['crawl_frequency'] = self.crawl_frequency
         self.crawl('data:,on_get_info', save=result)

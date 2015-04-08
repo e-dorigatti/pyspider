@@ -271,25 +271,29 @@ class Scheduler(object):
         for project in itervalues(self.projects):
             if project['status'] not in ('DEBUG', 'RUNNING'):
                 continue
-            if project.get('min_tick', 0) == 0:
-                continue
-            if self._last_tick % int(project['min_tick']) != 0:
-                continue
-            self.send_task({
-                'taskid': '_on_cronjob',
-                'project': project['name'],
-                'url': 'data:,_on_cronjob',
-                'status': self.taskdb.ACTIVE,
-                'fetch': {
-                    'save': {
-                        'tick': self._last_tick,
+            if project.get('min_tick', 0) and self._last_tick % int(project['min_tick']) == 0:
+                self.send_task({
+                    'taskid': '_on_cronjob',
+                    'project': project['name'],
+                    'url': 'data:,_on_cronjob',
+                    'status': self.taskdb.ACTIVE,
+                    'fetch': {
+                        'save': {
+                            'tick': self._last_tick,
+                        },
                     },
-                },
-                'process': {
-                    'callback': '_on_cronjob',
-                },
-                'project_updatetime': self.projects[project['name']].get('updatetime', 0),
-            })
+                    'process': {
+                        'callback': '_on_cronjob',
+                    },
+                    'project_updatetime': self.projects[project['name']].get('updatetime', 0),
+                })
+
+            last_start = self.taskdb.get_task(project['name'], 'on_start')
+            scraping_freq = project.get('crawl_frequency', 0)
+            if (last_start and scraping_freq > 0 and
+                    last_start['updatetime'] + scraping_freq < now):
+                self.trigger_on_start(project['name'], schedule={'force_update': True})
+
         return True
 
     request_task_fields = [
@@ -411,9 +415,10 @@ class Scheduler(object):
         logger.info("scheduler exiting...")
         self._dump_cnt()
 
-    def trigger_on_start(self, project):
+    def trigger_on_start(self, project, **kwargs):
         '''trigger an on_start callback of project'''
-        self.newtask_queue.put({
+        task = kwargs
+        task.update({
             "project": project,
             "taskid": "on_start",
             "url": "data:,on_start",
@@ -421,6 +426,8 @@ class Scheduler(object):
                 "callback": "on_start",
             },
         })
+
+        self.newtask_queue.put(task)
 
     def xmlrpc_run(self, port=23333, bind='127.0.0.1', logRequests=False):
         '''Start xmlrpc interface'''
