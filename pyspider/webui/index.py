@@ -21,8 +21,8 @@ def index():
 
     projects = list()
     for p in projectdb.get_all(fields=index_fields):
-        last_start = taskdb.get_task(p['name'], 'on_start')
-        p['last_run'] = last_start['lastcrawltime']
+        last_start = taskdb.get_task(p['name'], 'on_start') or {}
+        p['last_run'] = last_start.get('lastcrawltime', 0)
         projects.append(p)
 
     return render_template("index.html", projects=projects)
