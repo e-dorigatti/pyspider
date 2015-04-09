@@ -17,7 +17,15 @@ index_fields = ['name', 'group', 'status', 'comments', 'rate', 'burst', 'updatet
 @app.route('/')
 def index():
     projectdb = app.config['projectdb']
-    return render_template("index.html", projects=projectdb.get_all(fields=index_fields))
+    taskdb = app.config['taskdb']
+
+    projects = list()
+    for p in projectdb.get_all(fields=index_fields):
+        last_start = taskdb.get_task(p['name'], 'on_start')
+        p['last_run'] = last_start['lastcrawltime']
+        projects.append(p)
+
+    return render_template("index.html", projects=projects)
 
 
 @app.route('/update', methods=['POST', ])
