@@ -6,10 +6,12 @@
 # Created on 2015-01-18 14:09:41
 
 import os
+import sys
 import six
 import json
 import time
 import httpbin
+import subprocess
 import unittest2 as unittest
 try:
     from Queue import Queue
@@ -32,6 +34,10 @@ class TestFetcherProcessor(unittest.TestCase):
         self.result_queue = Queue()
         self.httpbin_thread = utils.run_in_subprocess(httpbin.app.run, port=14887)
         self.httpbin = 'http://127.0.0.1:14887'
+        self.proxy_thread = subprocess.Popen(['pyproxy', '--username=binux',
+                                              '--password=123456', '--port=14830',
+                                              '--debug'], close_fds=True)
+        self.proxy = '127.0.0.1:14830'
         self.processor = Processor(projectdb=self.projectdb,
                                    inqueue=None,
                                    status_queue=self.status_queue,
@@ -42,10 +48,12 @@ class TestFetcherProcessor(unittest.TestCase):
 
     @classmethod
     def tearDownClass(self):
+        self.proxy_thread.terminate()
+        self.proxy_thread.wait()
         self.httpbin_thread.terminate()
         self.httpbin_thread.join()
 
-    def crawl(self, url=None, **kwargs):
+    def crawl(self, url=None, track=None, **kwargs):
         if url is None and kwargs.get('callback'):
             url = dataurl.encode(utils.text(kwargs.get('callback')))
 
@@ -54,7 +62,9 @@ class TestFetcherProcessor(unittest.TestCase):
         instance = project_data['instance']
         instance._reset()
         task = instance.crawl(url, **kwargs)
-        assert not isinstance(task, list), 'url list is not allowed'
+        if isinstance(task, list):
+            task = task[0]
+        task['track'] = track
         task, result = self.fetcher.fetch(task)
         self.processor.on_task(task, result)
 
@@ -104,11 +114,11 @@ class TestFetcherProcessor(unittest.TestCase):
 
         self.assertFalse(self.status_ok(status, 'fetch'))
         self.assertFalse(self.status_ok(status, 'process'))
-        self.assertEqual(status['track']['fetch']['error'], 'HTTP 418: Unknown')
+        self.assertIn('HTTP 418', status['track']['fetch']['error'])
         self.assertTrue(status['track']['fetch']['content'], '')
         self.assertTrue(status['track']['fetch']['headers'])
         self.assertTrue(status['track']['process']['logs'])
-        self.assertIn('HTTPError: HTTP 418: Unknown', status['track']['process']['logs'])
+        self.assertIn('HTTPError: HTTP 418', status['track']['process']['logs'])
         self.assertFalse(newtasks)
 
 
@@ -227,19 +237,21 @@ class TestFetcherProcessor(unittest.TestCase):
         self.assertIn('a=b', result['headers'].get('Cookie'))
         self.assertIn('C-d=e-F', result['headers'].get('Cookie'))
 
-    # FIXME: cookies can't use with Cookie header
-    #def test_a130_cookies_with_headers(self):
-        #status, newtasks, result = self.crawl(self.httpbin+'/get',
-                                              #headers={
-                                                  #'Cookie': 'g=h; I=j',
-                                              #},
-                                              #cookies={
-                                                  #'a': 'b',
-                                                  #'C-d': 'e-F'
-                                              #}, callback=self.json)
-        #self.assertStatusOk(status)
-        #self.assertFalse(newtasks)
-        #self.assertEqual(result['headers'].get('Cookie'), 'g=h; I=j; a=b; C-d=e-F')
+    def test_a130_cookies_with_headers(self):
+        status, newtasks, result = self.crawl(self.httpbin+'/get',
+                                              headers={
+                                                  'Cookie': 'g=h; I=j',
+                                              },
+                                              cookies={
+                                                  'a': 'b',
+                                                  'C-d': 'e-F'
+                                              }, callback=self.json)
+        self.assertStatusOk(status)
+        self.assertFalse(newtasks)
+        self.assertIn('g=h', result['headers'].get('Cookie'))
+        self.assertIn('I=j', result['headers'].get('Cookie'))
+        self.assertIn('a=b', result['headers'].get('Cookie'))
+        self.assertIn('C-d=e-F', result['headers'].get('Cookie'))
 
     def test_a140_response_cookie(self):
         status, newtasks, result = self.crawl(self.httpbin+'/cookies/set?k1=v1&k2=v2',
@@ -247,6 +259,13 @@ class TestFetcherProcessor(unittest.TestCase):
         self.assertStatusOk(status)
         self.assertFalse(newtasks)
         self.assertEqual(result, {'k1': 'v1', 'k2': 'v2'})
+
+    def test_a145_redirect_cookie(self):
+        status, newtasks, result = self.crawl(self.httpbin+'/cookies/set?k1=v1&k2=v2',
+                                              callback=self.json)
+        self.assertStatusOk(status)
+        self.assertFalse(newtasks)
+        self.assertEqual(result['cookies'], {'k1': 'v1', 'k2': 'v2'})
 
     def test_a150_timeout(self):
         status, newtasks, result = self.crawl(self.httpbin+'/delay/2', timeout=1, callback=self.json)
@@ -285,16 +304,156 @@ class TestFetcherProcessor(unittest.TestCase):
         self.assertFalse(newtasks)
         self.assertFalse(result)
 
-    def test_links(self):
+    def test_a200_no_proxy(self):
+        old_proxy = self.fetcher.proxy
+        self.fetcher.proxy = self.proxy
+        status, newtasks, result = self.crawl(self.httpbin+'/get',
+                                              params={
+                                                  'test': 'a200'
+                                              }, proxy=False, callback=self.json)
+
+        self.assertStatusOk(status)
+        self.assertFalse(newtasks)
+        self.fetcher.proxy = old_proxy
+
+    def test_a210_proxy_failed(self):
+        old_proxy = self.fetcher.proxy
+        self.fetcher.proxy = self.proxy
+        status, newtasks, result = self.crawl(self.httpbin+'/get',
+                                              params={
+                                                  'test': 'a210'
+                                              }, callback=self.catch_http_error)
+
+        self.assertFalse(self.status_ok(status, 'fetch'))
+        self.assertTrue(self.status_ok(status, 'process'))
+        self.assertEqual(len(newtasks), 1, newtasks)
+        self.assertEqual(result, 403)
+        self.fetcher.proxy = old_proxy
+
+    def test_a220_proxy_ok(self):
+        old_proxy = self.fetcher.proxy
+        self.fetcher.proxy = self.proxy
+        status, newtasks, result = self.crawl(self.httpbin+'/get',
+                                              params={
+                                                  'test': 'a220',
+                                                  'username': 'binux',
+                                                  'password': '123456',
+                                              }, callback=self.catch_http_error)
+
+        self.assertStatusOk(status)
+        self.assertEqual(result, 200)
+        self.fetcher.proxy = old_proxy
+
+    def test_a230_proxy_parameter_fail(self):
+        status, newtasks, result = self.crawl(self.httpbin+'/get',
+                                              params={
+                                                  'test': 'a230',
+                                              }, proxy=self.proxy,
+                                              callback=self.catch_http_error)
+
+        self.assertFalse(self.status_ok(status, 'fetch'))
+        self.assertTrue(self.status_ok(status, 'process'))
+        self.assertEqual(result, 403)
+
+    def test_a240_proxy_parameter_ok(self):
+        status, newtasks, result = self.crawl(self.httpbin+'/post',
+                                              method='POST',
+                                              data={
+                                                  'test': 'a240',
+                                                  'username': 'binux',
+                                                  'password': '123456',
+                                              }, proxy=self.proxy,
+                                              callback=self.catch_http_error)
+
+        self.assertStatusOk(status)
+        self.assertEqual(result, 200)
+
+    def test_a250_proxy_userpass(self):
+        status, newtasks, result = self.crawl(self.httpbin+'/post',
+                                              method='POST',
+                                              data={
+                                                  'test': 'a250',
+                                              }, proxy='binux:123456@'+self.proxy,
+                                              callback=self.catch_http_error)
+
+        self.assertStatusOk(status)
+        self.assertEqual(result, 200)
+
+    def test_zzz_links(self):
         status, newtasks, result = self.crawl(self.httpbin+'/links/10/0', callback=self.links)
 
         self.assertStatusOk(status)
         self.assertEqual(len(newtasks), 9, newtasks)
         self.assertFalse(result)
 
-    def test_html(self):
+    def test_zzz_html(self):
         status, newtasks, result = self.crawl(self.httpbin+'/html', callback=self.html)
 
         self.assertStatusOk(status)
         self.assertFalse(newtasks)
         self.assertEqual(result, 'Herman Melville - Moby-Dick')
+
+    def test_zzz_etag_enabled(self):
+        status, newtasks, result = self.crawl(self.httpbin+'/cache', callback=self.json)
+        self.assertStatusOk(status)
+        self.assertTrue(result)
+
+        status, newtasks, result = self.crawl(self.httpbin+'/cache',
+                                              track=status['track'], callback=self.json)
+        self.assertStatusOk(status)
+        self.assertFalse(newtasks)
+        self.assertFalse(result)
+
+    def test_zzz_etag_not_working(self):
+        status, newtasks, result = self.crawl(self.httpbin+'/cache', callback=self.json)
+        self.assertStatusOk(status)
+        self.assertTrue(result)
+
+        status['track']['process']['ok'] = False
+        status, newtasks, result = self.crawl(self.httpbin+'/cache',
+                                              track=status['track'], callback=self.json)
+        self.assertStatusOk(status)
+        self.assertTrue(result)
+
+    def test_zzz_unexpected_crawl_argument(self):
+        with self.assertRaisesRegexp(TypeError, "unexpected keyword argument"):
+            self.crawl(self.httpbin+'/cache', cookie={}, callback=self.json)
+
+    def test_zzz_curl_get(self):
+        status, newtasks, result = self.crawl("curl '"+self.httpbin+'''/get' -H 'DNT: 1' -H 'Accept-Encoding: gzip, deflate, sdch' -H 'Accept-Language: en,zh-CN;q=0.8,zh;q=0.6' -H 'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2272.17 Safari/537.36' -H 'Binux-Header: Binux-Value' -H 'Accept: */*' -H 'Cookie: _gauges_unique_year=1; _gauges_unique=1; _ga=GA1.2.415471573.1419316591' -H 'Connection: keep-alive' --compressed''', callback=self.json)
+        self.assertStatusOk(status)
+        self.assertTrue(result)
+
+        self.assertTrue(result['headers'].get('Binux-Header'), 'Binux-Value')
+
+    def test_zzz_curl_post(self):
+        status, newtasks, result = self.crawl("curl '"+self.httpbin+'''/post' -H 'Origin: chrome-extension://hgmloofddffdnphfgcellkdfbfbjeloo' -H 'Accept-Encoding: gzip, deflate' -H 'Accept-Language: en,zh-CN;q=0.8,zh;q=0.6' -H 'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2272.17 Safari/537.36' -H 'Content-Type: application/x-www-form-urlencoded' -H 'Accept: */*' -H 'Cookie: _gauges_unique_year=1; _gauges_unique=1; _ga=GA1.2.415471573.1419316591' -H 'Connection: keep-alive' -H 'DNT: 1' --data 'Binux-Key=%E4%B8%AD%E6%96%87+value' --compressed''', callback=self.json)
+        self.assertStatusOk(status)
+        self.assertTrue(result)
+
+        self.assertTrue(result['form'].get('Binux-Key'), '中文 value')
+
+    def test_zzz_curl_put(self):
+        status, newtasks, result = self.crawl("curl '"+self.httpbin+'''/put' -X PUT -H 'Origin: chrome-extension://hgmloofddffdnphfgcellkdfbfbjeloo' -H 'Accept-Encoding: gzip, deflate, sdch' -H 'Accept-Language: en,zh-CN;q=0.8,zh;q=0.6' -H 'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2272.17 Safari/537.36' -H 'Content-Type: multipart/form-data; boundary=----WebKitFormBoundaryYlkgyaA7SRGOQYUG' -H 'Accept: */*' -H 'Cookie: _gauges_unique_year=1; _gauges_unique=1; _ga=GA1.2.415471573.1419316591' -H 'Connection: keep-alive' -H 'DNT: 1' --data-binary $'------WebKitFormBoundaryYlkgyaA7SRGOQYUG\r\nContent-Disposition: form-data; name="Binux-Key"\r\n\r\n%E4%B8%AD%E6%96%87+value\r\n------WebKitFormBoundaryYlkgyaA7SRGOQYUG\r\nContent-Disposition: form-data; name="fileUpload1"; filename="1"\r\nContent-Type: application/octet-stream\r\n\r\n\r\n------WebKitFormBoundaryYlkgyaA7SRGOQYUG--\r\n' --compressed''', callback=self.json)
+        self.assertStatusOk(status)
+        self.assertTrue(result)
+
+        self.assertIn('fileUpload1', result['files'], result)
+
+    def test_zzz_curl_no_url(self):
+        with self.assertRaisesRegexp(TypeError, 'no URL'):
+            status, newtasks, result = self.crawl(
+                '''curl -X PUT -H 'Origin: chrome-extension://hgmloofddffdnphfgcellkdfbfbjeloo' --compressed''',
+                callback=self.json)
+
+    def test_zzz_curl_bad_option(self):
+        with self.assertRaisesRegexp(TypeError, 'Unknow curl option'):
+            status, newtasks, result = self.crawl(
+                '''curl '%s/put' -X PUT -H 'Origin: chrome-extension://hgmloofddffdnphfgcellkdfbfbjeloo' -v''' % self.httpbin,
+                callback=self.json)
+
+        with self.assertRaisesRegexp(TypeError, 'Unknow curl option'):
+            status, newtasks, result = self.crawl(
+                '''curl '%s/put' -X PUT -v -H 'Origin: chrome-extension://hgmloofddffdnphfgcellkdfbfbjeloo' ''' % self.httpbin,
+                callback=self.json)
+

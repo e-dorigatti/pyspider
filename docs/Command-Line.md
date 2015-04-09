@@ -123,7 +123,7 @@ Options:
   --help             Show this message and exit.
 ```
 
-**NOTE: webui is not running in one mode.**
+**NOTE: WebUI is not running in one mode.**
 
 In `one` mode, results will be written to stdout by default. You can capture them via `pyspider one > result.txt`.
 
@@ -140,7 +140,7 @@ When SCRIPTS is set, `taskdb` and `resultdb` will use a in-memory sqlite db by d
 
 #### -i, --interactive
 
-With interactive mode, pyspider will start a interactive console asking what to do in next loop of process. In the console, you can use:
+With interactive mode, pyspider will start an interactive console asking what to do in next loop of process. In the console, you can use:
 
 ``` python
 crawl(url, project=None, **kwargs)
@@ -289,7 +289,6 @@ Options:
   --username TEXT        username of lock -ed projects
   --password TEXT        password of lock -ed projects
   --need-auth            need username and password
-  --fetcher-cls TEXT     Fetcher class to be used.
   --webui-instance TEXT  webui Flask Application instance to be used.
   --help                 Show this message and exit.
 ```

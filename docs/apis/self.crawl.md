@@ -4,7 +4,7 @@ self.crawl
 self.crawl(url, **kwargs)
 -------------------------
 
-`self.crawl` is the main interface to tell which url will been followed.
+`self.crawl` is the main interface to tell which url will be followed.
 
 ###basis
 
@@ -40,11 +40,20 @@ self.crawl(url, **kwargs)
 * `load_images` - _default: False_
 
 ### process
-* `save` - anything json-able object pass to next response. _can been get from `response.save`_
+* `save` - anything json-able object pass to next response. _can been got from `response.save`_
 
 ### other
-* `taskid` - uniq id for each task. _default: md5(url)_ , can be overrided by define your own `def get_taskid(self, task)`
+* `taskid` - unique id for each task. _default: md5(url)_ , can be overrided by define your own `def get_taskid(self, task)`
 * `force_update` - force update task params when task is in `ACTIVE` status.
+
+cURL command
+------------
+
+`self.crawl(curl_command)`
+
+cURL is a command line tool to make a HTTP request. cURL command can get from chrome devtools > network panel, right click a request and `Copy as cURL`.
+
+You can use cURL command as the first argument of `self.crawl`. It will parse the command and make the HTTP request just like curl do.
 
 @config(**kwargs)
 -----------------

@@ -11,22 +11,13 @@ import time
 import unittest2 as unittest
 
 from pyspider.libs import utils
-from pyspider.libs import rabbitmq
 
 
-class TestRabbitMQ(object):
+class TestMessageQueue(object):
 
     @classmethod
     def setUpClass(self):
         raise NotImplementedError
-
-    @classmethod
-    def tearDownClass(self):
-        self.q2.delete()
-        self.q3.delete()
-        del self.q1
-        del self.q2
-        del self.q3
 
     def test_10_put(self):
         self.assertEqual(self.q1.qsize(), 0)
@@ -72,10 +63,11 @@ class TestRabbitMQ(object):
 
 @unittest.skipIf(six.PY3, 'pika not suport python 3')
 @unittest.skipIf(os.environ.get('IGNORE_RABBITMQ'), 'no rabbitmq server for test.')
-class TestPikaRabbitMQ(TestRabbitMQ, unittest.TestCase):
+class TestPikaRabbitMQ(TestMessageQueue, unittest.TestCase):
 
     @classmethod
     def setUpClass(self):
+        from pyspider.libs import rabbitmq
         with utils.timeout(3):
             self.q1 = rabbitmq.PikaQueue('test_queue', maxsize=5)
             self.q2 = rabbitmq.PikaQueue('test_queue', maxsize=5)
@@ -85,12 +77,20 @@ class TestPikaRabbitMQ(TestRabbitMQ, unittest.TestCase):
         self.q3.delete()
         self.q3.reconnect()
 
+    @classmethod
+    def tearDownClass(self):
+        self.q2.delete()
+        self.q3.delete()
+        del self.q1
+        del self.q2
+        del self.q3
 
 @unittest.skipIf(os.environ.get('IGNORE_RABBITMQ'), 'no rabbitmq server for test.')
-class TestAmqpRabbitMQ(TestRabbitMQ, unittest.TestCase):
+class TestAmqpRabbitMQ(TestMessageQueue, unittest.TestCase):
 
     @classmethod
     def setUpClass(self):
+        from pyspider.libs import rabbitmq
         with utils.timeout(3):
             self.q1 = rabbitmq.AmqpQueue('test_queue', maxsize=5)
             self.q2 = rabbitmq.AmqpQueue('test_queue', maxsize=5)
@@ -99,3 +99,39 @@ class TestAmqpRabbitMQ(TestRabbitMQ, unittest.TestCase):
         self.q2.reconnect()
         self.q3.delete()
         self.q3.reconnect()
+
+    @classmethod
+    def tearDownClass(self):
+        self.q2.delete()
+        self.q3.delete()
+        del self.q1
+        del self.q2
+        del self.q3
+
+#@unittest.skipIf(True, "beanstalk queue can't pass the test currently")
+@unittest.skipIf(six.PY3, 'beanstalkc not suport python 3')
+@unittest.skipIf(os.environ.get('IGNORE_BEANSTALK'), 'no beanstalk server for test.')
+class TestBeansTalkQueue(TestMessageQueue, unittest.TestCase):
+
+    @classmethod
+    def setUpClass(self):
+        from pyspider.libs import beanstalk
+        with utils.timeout(3):
+            self.q1 = beanstalk.BeanstalkQueue('test_queue', maxsize=5)
+            self.q2 = beanstalk.BeanstalkQueue('test_queue', maxsize=5)
+            self.q3 = beanstalk.BeanstalkQueue('test_queue_for_threading_test')
+            while not self.q1.empty():
+                self.q1.get()
+            while not self.q2.empty():
+                self.q2.get()
+            while not self.q3.empty():
+                self.q3.get()
+
+    @classmethod
+    def tearDownClass(self):
+        while not self.q1.empty():
+            self.q1.get()
+        while not self.q2.empty():
+            self.q2.get()
+        while not self.q3.empty():
+            self.q3.get()

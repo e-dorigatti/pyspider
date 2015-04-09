@@ -9,8 +9,9 @@
 import os
 import json
 import time
-from six.moves import queue as Queue
 import logging
+import itertools
+from six.moves import queue as Queue
 from collections import deque
 
 from six import iteritems, itervalues
@@ -56,6 +57,8 @@ class Scheduler(object):
         self._last_tick = int(time.time())
 
         self._cnt = {
+            "5m_time": counter.CounterManager(
+                lambda: counter.TimebaseAverageEventCounter(30, 10)),
             "5m": counter.CounterManager(
                 lambda: counter.TimebaseAverageWindowCounter(30, 10)),
             "1h": counter.CounterManager(
@@ -163,7 +166,7 @@ class Scheduler(object):
                 logger.error('%s not in task: %.200r', each, task)
                 return False
         if task['project'] not in self.task_queue:
-            logger.error('unknow project: %s', task['project'])
+            logger.error('unknown project: %s', task['project'])
             return False
         return True
 
@@ -340,6 +343,44 @@ class Scheduler(object):
             cnt_dict[project] = cnt
         return cnt_dict
 
+    def _print_counter_log(self):
+        # print top 5 active counters
+        keywords = ('pending', 'success', 'retry', 'failed')
+        total_cnt = {}
+        project_actives = []
+        project_fails = []
+        for key in keywords:
+            total_cnt[key] = 0
+        for project, subcounter in iteritems(self._cnt['5m']):
+            actives = 0
+            for key in keywords:
+                cnt = subcounter.get(key, None)
+                if cnt:
+                    cnt = cnt.sum
+                    total_cnt[key] += cnt
+                    actives += cnt
+
+            project_actives.append((actives, project))
+
+            fails = subcounter.get('failed', None)
+            if fails:
+                project_fails.append((fails.sum, project))
+
+        top_2_fails = sorted(project_fails, reverse=True)[:2]
+        top_3_actives = sorted([x for x in project_actives if x[1] not in top_2_fails],
+                               reverse=True)[:5 - len(top_2_fails)]
+
+        log_str = ("in 5m: new:%(pending)d,success:%(success)d,"
+                   "retry:%(retry)d,failed:%(failed)d" % total_cnt)
+        for _, project in itertools.chain(top_3_actives, top_2_fails):
+            subcounter = self._cnt['5m'][project].to_dict(get_value='sum')
+            log_str += " %s:%d,%d,%d,%d" % (project,
+                                            subcounter.get('pending', 0),
+                                            subcounter.get('success', 0),
+                                            subcounter.get('retry', 0),
+                                            subcounter.get('failed', 0))
+        logger.info(log_str)
+
     def _dump_cnt(self):
         '''Dump counters to file'''
         self._cnt['1h'].dump(os.path.join(self.data_path, 'scheduler.1h'))
@@ -352,6 +393,7 @@ class Scheduler(object):
         if now - self._last_dump_cnt > 60:
             self._last_dump_cnt = now
             self._dump_cnt()
+            self._print_counter_log()
 
     def _check_delete(self):
         '''Check project delete'''
@@ -444,7 +486,10 @@ class Scheduler(object):
         server.register_function(self.__len__, 'size')
 
         def dump_counter(_time, _type):
-            return self._cnt[_time].to_dict(_type)
+            try:
+                return self._cnt[_time].to_dict(_type)
+            except:
+                logger.exception('')
         server.register_function(dump_counter, 'counter')
 
         def new_task(task):
@@ -453,6 +498,12 @@ class Scheduler(object):
                 return True
             return False
         server.register_function(new_task, 'newtask')
+
+        def send_task(task):
+            '''dispatch task to fetcher'''
+            self.send_task(task)
+            return True
+        server.register_function(send_task, 'send_task')
 
         def update_project():
             self._force_update_project = True
@@ -571,6 +622,13 @@ class Scheduler(object):
             ret = self.on_task_done(task)
         else:
             ret = self.on_task_failed(task)
+
+        if task['track']['fetch'].get('time'):
+            self._cnt['5m_time'].event((task['project'], 'fetch_time'),
+                                       task['track']['fetch']['time'])
+        if task['track']['process'].get('time'):
+            self._cnt['5m_time'].event((task['project'], 'process_time'),
+                                       task['track']['process'].get('time'))
         self.projects[task['project']]['active_tasks'].appendleft((time.time(), task))
         return ret
 
@@ -592,7 +650,7 @@ class Scheduler(object):
         '''Called when a task is failed, called by `on_task_status`'''
         old_task = self.taskdb.get_task(task['project'], task['taskid'], fields=['schedule'])
         if old_task is None:
-            logging.error('unknow status pack: %s' % task)
+            logging.error('unknown status pack: %s' % task)
             return
         if not task.get('schedule'):
             task['schedule'] = old_task.get('schedule', {})
@@ -754,6 +812,12 @@ class OneScheduler(Scheduler):
             ret = self.on_task_done(task)
         else:
             ret = self.on_task_failed(task)
+        if task['track']['fetch'].get('time'):
+            self._cnt['5m_time'].event((task['project'], 'fetch_time'),
+                                       task['track']['fetch']['time'])
+        if task['track']['process'].get('time'):
+            self._cnt['5m_time'].event((task['project'], 'process_time'),
+                                       task['track']['process'].get('time'))
         self.projects[task['project']]['active_tasks'].appendleft((time.time(), task))
         return ret
 

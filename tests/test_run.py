@@ -198,7 +198,7 @@ class TestRun(unittest.TestCase):
         try:
             limit = 30
             while limit >= 0:
-                time.sleep(1)
+                time.sleep(3)
                 # click run
                 try:
                     requests.post('http://localhost:5000/run', data={
@@ -210,11 +210,11 @@ class TestRun(unittest.TestCase):
                 break
 
             limit = 30
-            data = requests.get('http://localhost:5000/counter?time=5m&type=sum')
+            data = requests.get('http://localhost:5000/counter')
             self.assertEqual(data.status_code, 200)
-            while data.json().get('data_sample_handler', {}).get('success', 0) < 5:
+            while data.json().get('data_sample_handler', {}).get('5m', {}).get('success', 0) < 5:
                 time.sleep(1)
-                data = requests.get('http://localhost:5000/counter?time=5m&type=sum')
+                data = requests.get('http://localhost:5000/counter')
                 limit -= 1
                 if limit <= 0:
                     break
@@ -265,7 +265,7 @@ class TestRun(unittest.TestCase):
                     print(t, end='')
                 return ''.join(text)
 
-            text = wait_text()
+            text = wait_text(3)
             self.assertIn('new task data_sample_handler:on_start', text)
             self.assertIn('pyspider shell', text)
 
@@ -279,7 +279,10 @@ class TestRun(unittest.TestCase):
 
             os.write(fd, utils.utf8('crawl("%s/links/10/0")\n' % self.httpbin))
             text = wait_text()
-            self.assertIn('"title": "Links"', text)
+            if '"title": "Links"' not in text:
+                os.write(fd, utils.utf8('crawl("%s/links/10/1")\n' % self.httpbin))
+                text = wait_text()
+                self.assertIn('"title": "Links"', text)
 
             os.write(fd, utils.utf8('crawl("%s/404")\n' % self.httpbin))
             text = wait_text()
@@ -290,3 +293,44 @@ class TestRun(unittest.TestCase):
             self.assertIn('scheduler exiting...', text)
             os.close(fd)
             os.kill(pid, signal.SIGINT)
+
+class TestSendMessage(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(self):
+        shutil.rmtree('./data/tests', ignore_errors=True)
+        os.makedirs('./data/tests')
+
+        ctx = run.cli.make_context('test', [
+            '--taskdb', 'sqlite+taskdb:///data/tests/task.db',
+            '--projectdb', 'sqlite+projectdb:///data/tests/projectdb.db',
+            '--resultdb', 'sqlite+resultdb:///data/tests/resultdb.db',
+        ], None, obj=dict(testing_mode=True))
+        self.ctx = run.cli.invoke(ctx)
+
+        ctx = run.scheduler.make_context('scheduler', [], self.ctx)
+        scheduler = run.scheduler.invoke(ctx)
+        utils.run_in_thread(scheduler.xmlrpc_run)
+        utils.run_in_thread(scheduler.run)
+
+        time.sleep(1)
+
+    @classmethod
+    def tearDownClass(self):
+        for each in self.ctx.obj.instances:
+            each.quit()
+        time.sleep(1)
+
+        shutil.rmtree('./data/tests', ignore_errors=True)
+
+    def test_10_send_message(self):
+        ctx = run.send_message.make_context('send_message', [
+            'test_project', 'test_message'
+        ], self.ctx)
+        self.assertTrue(run.send_message.invoke(ctx))
+        while True:
+            task = self.ctx.obj.scheduler2fetcher.get(timeout=1)
+            if task['url'] == 'data:,on_message':
+                break
+        self.assertEqual(task['process']['callback'], '_on_message')
+
