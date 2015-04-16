@@ -120,22 +120,22 @@ def format_date(date, gmt_offset=0, relative=True, shorter=False, full_format=Fa
             format = "%(time)s"
         elif days == 1 and local_date.day == local_yesterday.day and \
                 relative:
-            format = "yesterday" if shorter else "yesterday at %(time)s"
+            format = "Yesterday" if shorter else "Yesterday at %(time)s"
         elif days < 5:
             format = "%(weekday)s" if shorter else "%(weekday)s at %(time)s"
         elif days < 334:  # 11mo, since confusing for same month last year
-            format = "%(month_name)s-%(day)s" if shorter else \
-                "%(month_name)s-%(day)s at %(time)s"
+            format = "%(day)s %(month_name)s" if shorter else \
+                "%(day)s %(month_name)s at %(time)s"
 
     if format is None:
-        format = "%(month_name)s %(day)s, %(year)s" if shorter else \
-            "%(month_name)s %(day)s, %(year)s at %(time)s"
+        format = "%(day)s %(month_name)s, %(year)s" if shorter else \
+            "%(day)s %(month_name)s, %(year)s at %(time)s"
 
     str_time = "%d:%02d" % (local_date.hour, local_date.minute)
 
     return format % {
-        "month_name": local_date.month - 1,
-        "weekday": local_date.weekday(),
+        "month_name": local_date.strftime("%B"),
+        "weekday": local_date.strftime("%A"),
         "day": str(local_date.day),
         "year": str(local_date.year),
         "time": str_time
