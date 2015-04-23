@@ -294,7 +294,7 @@ class Scheduler(object):
             last_start = self.taskdb.get_task(project['name'], 'on_start')
             scraping_freq = project.get('crawl_frequency', 0)
             if (last_start and scraping_freq > 0 and
-                    last_start['updatetime'] + scraping_freq < now):
+                    last_start['lastcrawltime'] + scraping_freq < now):
                 self.trigger_on_start(project['name'], schedule={'force_update': True})
 
         return True
