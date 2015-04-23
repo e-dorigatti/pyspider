@@ -11,6 +11,7 @@ import json
 import time
 import logging
 import itertools
+import datetime
 from six.moves import queue as Queue
 from collections import deque
 
@@ -267,6 +268,14 @@ class Scheduler(object):
     def _check_cronjob(self):
         """Check projects cronjob tick, return True when a new tick is sended"""
         now = time.time()
+        now_dt = datetime.datetime.fromtimestamp(now)
+        now_dict = {
+            'weekdays': now_dt.weekday(),
+            'days': now_dt.day,
+            'hours': now_dt.hour,
+            'minutes': now_dt.minute
+        }
+
         self._last_tick = int(self._last_tick)
         if now - self._last_tick < 1:
             return False
@@ -292,10 +301,23 @@ class Scheduler(object):
                 })
 
             last_start = self.taskdb.get_task(project['name'], 'on_start')
+
             scraping_freq = project.get('crawl_frequency', 0)
-            if (last_start and scraping_freq > 0 and
-                    last_start.get('lastcrawltime', now) + scraping_freq < now):
+            if (scraping_freq > 0 and last_start and last_start['lastcrawltime'] and
+                    last_start['lastcrawltime'] + scraping_freq < now):
                 self.trigger_on_start(project['name'], schedule={'force_update': True})
+
+            scraper_schedule = project.get('scraper_schedule')
+            if scraper_schedule and last_start and last_start['lastcrawltime']:
+                schedule = {'weekdays': range(7), 'days': range(31), 'hours': range(24), 'minutes': range(60)}
+                schedule.update(scraper_schedule)
+
+                since_last_start = now - last_start['lastcrawltime']
+                since_last_update = now - last_start['updatetime']
+
+                if (all(value in schedule[key] for key, value in now_dict.iteritems())
+                        and since_last_update > 5 and since_last_start > 60):
+                    self.trigger_on_start(project['name'], schedule={'force_update': True})
 
         return True
 

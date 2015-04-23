@@ -131,6 +131,7 @@ class BaseHandler(object):
     _min_tick = 0
     __env__ = {'not_inited': True}
     crawl_frequency = 0  # seconds
+    scraper_schedule = None  # dict with lists weekdays, days, hours, minutes
 
     def _reset(self):
         """
@@ -388,4 +389,5 @@ class BaseHandler(object):
             if each == 'min_tick':
                 result[each] = self._min_tick
         result['crawl_frequency'] = self.crawl_frequency
+        result['scraper_schedule'] = self.scraper_schedule
         self.crawl('data:,on_get_info', save=result)
