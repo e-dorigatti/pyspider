@@ -10,6 +10,7 @@ import socket
 from flask import render_template, request, json
 from flask.ext import login
 from .app import app
+from pyspider.libs.utils import format_date
 
 index_fields = ['name', 'group', 'status', 'comments', 'rate', 'burst', 'updatetime']
 
@@ -17,15 +18,7 @@ index_fields = ['name', 'group', 'status', 'comments', 'rate', 'burst', 'updatet
 @app.route('/')
 def index():
     projectdb = app.config['projectdb']
-    taskdb = app.config['taskdb']
-    resultdb = app.config['resultdb']
-
-    projects = list()
-    for p in projectdb.get_all(fields=index_fields):
-        last_start = taskdb.get_task(p['name'], 'on_start') or {}
-        p['num_results'] = resultdb.count(p['name'])
-        p['last_run'] = last_start.get('lastcrawltime', 0)
-        projects.append(p)
+    projects = projectdb.get_all(fields=index_fields)
 
     return render_template("index.html", projects=projects)
 
@@ -154,6 +147,23 @@ def runtask():
         app.logger.warning('connect to scheduler rpc error: %r', e)
         return json.dumps({"result": False}), 200, {'Content-Type': 'application/json'}
     return json.dumps({"result": ret}), 200, {'Content-Type': 'application/json'}
+
+
+@app.route('/stats.json')
+def stats():
+    projectdb = app.config['projectdb']
+    taskdb = app.config['taskdb']
+    resultdb = app.config['resultdb']
+
+    projects = dict()
+    for p in projectdb.get_all(fields=index_fields):
+        last_start = taskdb.get_task(p['name'], 'on_start') or {}
+        projects[p['name']] = {
+            'num_results': resultdb.count(p['name']),
+            'last_run': format_date(last_start.get('lastcrawltime', 0)),
+        }
+
+    return json.dumps(projects), 200, {'Content-Type': 'application/json'}
 
 
 @app.route('/robots.txt')

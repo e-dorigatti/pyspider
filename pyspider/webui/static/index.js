@@ -165,6 +165,23 @@ $(function() {
   window.setInterval(update_queues, 15*1000);
   update_queues();
 
+  function update_stats() {
+    $.get('/stats.json', function(data) {
+      $('tr[data-name]').each(function(i, tr) {
+        var project = $(tr).data('name');
+        var info = data[project];
+        if (info === undefined) {
+          return;
+        }
+
+        $(tr).find('.project-last-run').html(info['last_run']);
+        $(tr).find('.project-results').html(info['num_results']);
+      });
+    });
+  }
+  window.setInterval(update_stats, 15*1000);
+  update_stats();
+
   // table sortable
   Sortable.getColumnType = function(table, i) {
     var type = $($(table).find('th').get(i)).data('type');

@@ -69,7 +69,7 @@
           <tr data-name="{{ project['name'] }}">
             <td class="project-group"><span>{{ project['group'] or '' }}</span></td>
             <td class="project-name"><a href="/debug/{{ project['name'] }}">{{ project['name'] }}</a></td>
-            <td> {{ project['last_run'] | format_date }} </td>
+            <td class="project-last-run"> - </td>
             <td class="project-status">
               <span class="status-{{ project['status'] }}" data-value="{{ project['status'] }}">{{ project['status'] }}</span>
             </td>
@@ -118,9 +118,7 @@
               # endif
               # if config.resultdb:
               <a class="btn btn-default btn-xs" href="/results?project={{ project.name }}" target=_blank
-                 style="width:100px;">
-                  Results ({{ project.num_results }})
-              </a>
+                 style="width:100px;">Results (<span class="project-results">0</span>)</a>
               # endif
             </td>
           </tr>
