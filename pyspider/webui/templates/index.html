@@ -117,7 +117,10 @@
               <a class="btn btn-default btn-xs" href="/tasks?project={{ project.name }}" target=_blank>Active Tasks</a>
               # endif
               # if config.resultdb:
-              <a class="btn btn-default btn-xs" href="/results?project={{ project.name }}" target=_blank>Results</a>
+              <a class="btn btn-default btn-xs" href="/results?project={{ project.name }}" target=_blank
+                 style="width:100px;">
+                  Results ({{ project.num_results }})
+              </a>
               # endif
             </td>
           </tr>

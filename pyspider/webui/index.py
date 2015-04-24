@@ -18,10 +18,12 @@ index_fields = ['name', 'group', 'status', 'comments', 'rate', 'burst', 'updatet
 def index():
     projectdb = app.config['projectdb']
     taskdb = app.config['taskdb']
+    resultdb = app.config['resultdb']
 
     projects = list()
     for p in projectdb.get_all(fields=index_fields):
         last_start = taskdb.get_task(p['name'], 'on_start') or {}
+        p['num_results'] = resultdb.count(p['name'])
         p['last_run'] = last_start.get('lastcrawltime', 0)
         projects.append(p)
 
