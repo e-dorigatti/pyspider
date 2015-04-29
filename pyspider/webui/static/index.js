@@ -4,6 +4,8 @@
 // Created on 2014-03-02 17:53:23
 
 $(function() {
+    var timer; // timer for updating statistics
+
   $(".project-group>span").editable({
     name: 'group',
     pk: function(e) {
@@ -31,7 +33,9 @@ $(function() {
     placement: 'right',
     url: "/update",
     success: function(response, value) {
-      $(this).removeClass('status-'+$(this).attr('data-value')).addClass('status-'+value).attr('data-value', value).attr('style', '');
+      window.clearInterval(timer);
+      update_stats();
+      timer = window.setInterval(update_stats, 15*1000);
     }
   });
 
@@ -168,23 +172,26 @@ $(function() {
   function update_stats() {
     $.get('/stats.json', function(data) {
       $('tr[data-name]').each(function(i, tr) {
-        var project = $(tr).data('name');
+        var $tr = $(tr);
+
+        var project = $tr.data('name');
         var info = data[project];
         if (info === undefined) {
           return;
         }
 
-        $(tr).find('.project-last-run').html(info['last_run']);
-        $(tr).find('.project-results').html(info['num_results']);
-        $(tr).find('.project-status>span').removeClass().attr('style', '')
+        $tr.find('.project-last-run').html(info['last_run']);
+        $tr.find('.project-results').html(info['num_results']);
+        $tr.find('.project-status>span').removeClass().removeAttr('style')
                                           .addClass('editable').addClass('editable-click')
                                           .addClass('status-' + info['status'])
                                           .attr('data-value', info['status'])
-                                          .html(info['status']);
+                                          .removeAttr('data-original-title')
+                                          .removeAttr('title').html(info['status']);
       });
     });
   }
-  window.setInterval(update_stats, 15*1000);
+  timer = window.setInterval(update_stats, 15*1000);
   update_stats();
 
   // table sortable
