@@ -176,6 +176,11 @@ $(function() {
 
         $(tr).find('.project-last-run').html(info['last_run']);
         $(tr).find('.project-results').html(info['num_results']);
+        $(tr).find('.project-status>span').removeClass().attr('style', '')
+                                          .addClass('editable').addClass('editable-click')
+                                          .addClass('status-' + info['status'])
+                                          .attr('data-value', info['status'])
+                                          .html(info['status']);
       });
     });
   }

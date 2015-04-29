@@ -161,6 +161,7 @@ def stats():
         projects[p['name']] = {
             'num_results': resultdb.count(p['name']),
             'last_run': format_date(last_start.get('lastcrawltime', 0)),
+            'status': p['status'],
         }
 
     return json.dumps(projects), 200, {'Content-Type': 'application/json'}

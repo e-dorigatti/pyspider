@@ -70,9 +70,7 @@
             <td class="project-group"><span>{{ project['group'] or '' }}</span></td>
             <td class="project-name"><a href="/debug/{{ project['name'] }}">{{ project['name'] }}</a></td>
             <td class="project-last-run"> - </td>
-            <td class="project-status">
-              <span class="status-{{ project['status'] }}" data-value="{{ project['status'] }}">{{ project['status'] }}</span>
-            </td>
+            <td class="project-status"><span></span></td>
             <td class="project-rate"><span>{{ project['rate'] }}/{{ project['burst'] }}</span></td>
             <td class="project-time"></td>
             <td class="project-progress progress-5m">
