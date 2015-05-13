@@ -449,6 +449,7 @@ class Scheduler(object):
     def run_once(self):
         '''comsume queues and feed tasks to fetcher, once'''
 
+        self._force_update_project = True
         self._update_projects()
         self._check_task_done()
         self._check_request()
