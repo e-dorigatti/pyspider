@@ -15,6 +15,7 @@ import inspect
 import traceback
 import linecache
 from pyspider.libs.log import SaveLogHandler, LogFormatter
+
 logger = logging.getLogger("processor")
 
 
@@ -89,32 +90,17 @@ class ProjectManager(object):
         self.projects = {}
         self.last_check_projects = time.time()
 
-    def _need_update(self, project_name, updatetime=None):
-        '''Check if project_name need update'''
-        if project_name not in self.projects:
+    def _need_update(self, project):
+        ''' Check if the needs to be updated '''
+        if project['name'] not in self.projects:
             return True
-        if updatetime and updatetime > self.projects[project_name]['info'].get('updatetime', 0):
+
+        last_update = project['updatetime']
+        our_update = self.projects[project['name']]['info']['updatetime']
+        if our_update < last_update:
             return True
-        if time.time() - self.projects[project_name]['load_time'] > self.RELOAD_PROJECT_INTERVAL:
-            return True
+
         return False
-
-    def _check_projects(self):
-        '''Check projects by last update time'''
-        for project in self.projectdb.check_update(self.last_check_projects,
-                                                   ['name', 'updatetime']):
-            if project['name'] not in self.projects:
-                continue
-            if project['updatetime'] > self.projects[project['name']]['info'].get('updatetime', 0):
-                self._update_project(project['name'])
-        self.last_check_projects = time.time()
-
-    def _update_project(self, project_name):
-        '''Update one project from database'''
-        project = self.projectdb.get(project_name)
-        if not project:
-            return None
-        return self._load_project(project)
 
     def _load_project(self, project):
         '''Load project into self.projects from project info dict'''
@@ -138,12 +124,14 @@ class ProjectManager(object):
         logger.debug('project: %s updated.', project.get('name', None))
         return True
 
-    def get(self, project_name, updatetime=None):
+    def get(self, project_name, _=None):  # parameter kept for compatibility
         '''get project data object, return None if not exists'''
-        if time.time() - self.last_check_projects < self.CHECK_PROJECTS_INTERVAL:
-            self._check_projects()
-        if self._need_update(project_name, updatetime):
-            self._update_project(project_name)
+        project = self.projectdb.get(project_name)
+        if not project and project_name in self.projects:
+            self.projects.pop(project_name)  # this project was deleted
+        elif self._need_update(project):
+            self._load_project(project)
+
         return self.projects.get(project_name, None)
 
 
