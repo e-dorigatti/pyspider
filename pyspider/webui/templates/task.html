@@ -28,6 +28,10 @@
           {% else %}
           (<span class=update-time>{{ task.updatetime | format_date }}</span> updated )
           {% endif %}
+          <br />
+          <form action="/task/{{ task.project }}:{{ task.taskid }}/resubmit" method="GET" target="_blank">
+            <button type="submit" id="schedule_again" class="btn btn-default btn-xs">Resubmit</button>
+          </form>
         </p>
       </div>
       <div class=more-info>
