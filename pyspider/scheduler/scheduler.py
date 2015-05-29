@@ -680,12 +680,7 @@ class Scheduler(object):
 
         retries = task['schedule'].get('retries', self.default_schedule['retries'])
         retried = task['schedule'].get('retried', 0)
-        if retried == 0:
-            next_exetime = 0
-        elif retried == 1:
-            next_exetime = 1 * 60 * 60
-        else:
-            next_exetime = 6 * (2 ** retried) * 60 * 60
+        next_exetime = retried * 60
 
         if retried >= retries:
             task['status'] = self.taskdb.FAILED
