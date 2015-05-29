@@ -6,6 +6,8 @@
 # Created on 2014-07-16 15:30:57
 
 import socket
+import datetime
+import hashlib
 from flask import abort, render_template, request, json, jsonify
 
 from pyspider.libs import utils
@@ -36,6 +38,25 @@ def task(taskid):
         return render_template("task.html", task=task, json=json, result=result,
                                status_to_string=app.config['taskdb'].status_to_string)
 
+@app.route('/tasks/<project>/new')
+def new_task(project):
+    task = {
+        'project': project,
+        'process': {
+            'callback': request.args['callback']
+        },
+        'schedule': {
+            'age': 0,
+            'force_update': True
+        },
+        'url': request.args['url'],
+        'taskid': hashlib.sha1(project + datetime.datetime.now().ctime()).hexdigest()
+    }
+
+    rpc = app.config['scheduler_rpc']
+    rpc.newtask(task)
+
+    return jsonify(task)
 
 @app.route('/task/<taskid>/resubmit')
 def submit_task(taskid):
@@ -51,9 +72,7 @@ def submit_task(taskid):
     rpc = app.config['scheduler_rpc']
     rpc.newtask(task)
 
-    return jsonify({
-        'status': 'OK'
-    })
+    return jsonify(task)
 
 
 @app.route('/tasks')
