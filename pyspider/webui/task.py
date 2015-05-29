@@ -6,7 +6,7 @@
 # Created on 2014-07-16 15:30:57
 
 import socket
-from flask import abort, render_template, request, json
+from flask import abort, render_template, request, json, jsonify
 
 from pyspider.libs import utils
 from .app import app
@@ -35,6 +35,25 @@ def task(taskid):
     else:
         return render_template("task.html", task=task, json=json, result=result,
                                status_to_string=app.config['taskdb'].status_to_string)
+
+
+@app.route('/task/<taskid>/resubmit')
+def submit_task(taskid):
+    if ':' not in taskid:
+        abort(400)
+    project, taskid = taskid.split(':')
+
+    taskdb = app.config['taskdb']
+    task = taskdb.get_task(project, taskid)
+    if not task:
+        abort(404)
+
+    rpc = app.config['scheduler_rpc']
+    rpc.newtask(task)
+
+    return jsonify({
+        'status': 'OK'
+    })
 
 
 @app.route('/tasks')
