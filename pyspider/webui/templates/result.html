@@ -48,7 +48,7 @@
         # for result in results
         <tr>
           <td>
-            <a class=url href="/task/{{ project }}:{{ result.taskid }}" target=_blank>{{ result.url }}</a>
+            <a class=url href="/task/{{ project }}:{{ result.taskid[:32] }}" target=_blank>{{ result.url }}</a>
           </td>
           <td>
             <a class=open-url href="{{ result.url }}" target="_blank"><span class="glyphicon glyphicon-new-window"></span></a>
