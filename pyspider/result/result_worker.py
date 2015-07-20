@@ -158,7 +158,7 @@ class CustomPKResultWorker(ResultWorker):
             return all(success)
 
         if result and self.PK_FIELD_NAME in result:
-            task['taskid'] += self._deep_hash(result.pop(self.PK_FIELD_NAME))
+            task['taskid'] = task['taskid'][:32] + self._deep_hash(result.pop(self.PK_FIELD_NAME))
         return super(CustomPKResultWorker, self).on_result(task, result)
 
     @staticmethod
