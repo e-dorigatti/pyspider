@@ -1,5 +1,6 @@
 *.py[cod]
 data/*
+config.json
 
 # C extensions
 *.so
