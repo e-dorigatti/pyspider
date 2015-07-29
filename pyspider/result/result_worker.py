@@ -143,6 +143,7 @@ class CustomPKResultWorker(ResultWorker):
     2) an item to be returned from different tasks.
     For this to work, each item should define its own 'pk' field, which
     will be removed from the item itself before being stored in the resultdb.
+    a new field containing the taskid will be added into the result object
 
     Please notice that this will break the pyspider UI, as this will override
     the taskid right before storing the result in the database, and therefore
@@ -158,7 +159,9 @@ class CustomPKResultWorker(ResultWorker):
             return all(success)
 
         if result and self.PK_FIELD_NAME in result:
-            task['taskid'] = task['taskid'][:32] + self._deep_hash(result.pop(self.PK_FIELD_NAME))
+            result['taskid'] = task['taskid']
+            task['taskid'] = self._deep_hash(result.pop(self.PK_FIELD_NAME))
+
         return super(CustomPKResultWorker, self).on_result(task, result)
 
     @staticmethod

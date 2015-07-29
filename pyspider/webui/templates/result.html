@@ -33,8 +33,7 @@
     # set common_fields, results = result_formater(results)
     <table class="table table-condensed table-striped">
       <thead>
-        <th>url</th>
-        <th></th>
+        <th>task</th>
         # for field in common_fields|sort
         <th>
           {{ field }}
@@ -48,10 +47,11 @@
         # for result in results
         <tr>
           <td>
-            <a class=url href="/task/{{ project }}:{{ result.taskid[:32] }}" target=_blank>{{ result.url }}</a>
-          </td>
-          <td>
-            <a class=open-url href="{{ result.url }}" target="_blank"><span class="glyphicon glyphicon-new-window"></span></a>
+            # if taskid in result.result
+            <a class=open-url href="/task/{{ project }}:{{ result.result.taskid }}" target="_blank"><span class="glyphicon glyphicon-new-window"></span></a>
+            # else
+            <a class=open-url href="/task/{{ project }}:{{ result.taskid }}" target="_blank"><span class="glyphicon glyphicon-new-window"></span></a>
+            #endif
           </td>
           # for field in common_fields|sort
           <td>{{ json.dumps(result.result_formated[field], ensure_ascii=False) | truncate(100, True) }}</td>
