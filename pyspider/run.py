@@ -298,9 +298,12 @@ def result_worker(ctx, result_cls):
 @click.option('--need-auth', is_flag=True, default=False, help='need username and password')
 @click.option('--webui-instance', default='pyspider.webui.app.app', callback=load_cls,
               help='webui Flask Application instance to be used.')
+@click.option('--processes', default=4, help='if greater than 1 then handle each request'
+                                             ' in a new process up to this maximum number'
+                                             ' of concurrent processes')
 @click.pass_context
 def webui(ctx, host, port, cdn, scheduler_rpc, fetcher_rpc, max_rate, max_burst,
-          username, password, need_auth, webui_instance):
+          username, password, need_auth, webui_instance, processes):
     """
     Run WebUI
     """
@@ -311,6 +314,7 @@ def webui(ctx, host, port, cdn, scheduler_rpc, fetcher_rpc, max_rate, max_burst,
     app.config['projectdb'] = g.projectdb
     app.config['resultdb'] = g.resultdb
     app.config['cdn'] = cdn
+    app.config['processes'] = processes
 
     if max_rate:
         app.config['max_rate'] = max_rate

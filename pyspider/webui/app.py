@@ -55,7 +55,8 @@ class TornadoFlask(Flask):
             application = DebuggedApplication(application, True)
 
         def inner():
-            self.server = make_server(hostname, port, application)
+            processes = self.config.get('processes', 4)
+            self.server = make_server(hostname, port, application, processes=processes)
             self.server.serve_forever()
 
         if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
