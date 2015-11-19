@@ -308,10 +308,11 @@ class Scheduler(object):
                 self.trigger_on_start(project['name'], schedule={'force_update': True})
 
             scraper_schedule = project.get('scraper_schedule')
-            if scraper_schedule and last_start and last_start['lastcrawltime']:
+            if scraper_schedule:
                 schedule = {'weekdays': range(7), 'days': range(31), 'hours': range(24), 'minutes': range(60)}
                 schedule.update(scraper_schedule)
 
+                last_start = last_start or dict(lastcrawltime=0, updatetime=0)
                 since_last_start = now - last_start['lastcrawltime']
                 since_last_update = now - last_start['updatetime']
 
