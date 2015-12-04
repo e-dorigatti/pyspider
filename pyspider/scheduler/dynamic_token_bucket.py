@@ -1,7 +1,6 @@
 
 from .token_bucket import Bucket
-from scipy import stats
-import numpy as np
+import math
 from datetime import datetime
 import pytz
 import random
@@ -10,23 +9,26 @@ import random
 class DynamicBucket(Bucket):
     """ Token-bucket algorithm with time varying rate and unlimited burst
     If burst is set to a negative number the bucket fill rate is a bimodal
-    distribution obtained by summing two student's t distribution.
+    distribution obtained by summing two independent normal random variables.
     If burst is positive then the standart token-bucket algorithm is used.
     """
     def __init__(self, rate=1, burst=None, timezone=None,
-                 dist1=(11, 1, 2),    # (center, degrees of freedom, scale)
-                 dist2=(16, 1, 3)):   # (center, degrees of freedom, scale)
+                 dist1=(10, 2, 1),     # mu, sigma, scaling
+                 dist2=(16, 2, 0.7)):  # mu, sigma, scaling
         super(DynamicBucket, self).__init__(rate, burst)
         self.timezone = timezone or pytz.timezone(random.choice(pytz.common_timezones))
 
-        xs = np.arange(0, 24, 1/60.)
-        self.rate_time = map(sum, zip(self._make_t(xs, *dist1), self._make_t(xs, *dist2)))
+        xs = [x / 60. for x in range(0, 24 * 60)]
+        self.rate_time = map(sum, zip(self.compute_distribution(xs, *dist1),
+                                      self.compute_distribution(xs, *dist2)))
         self.ymax = max(self.rate_time)
         self._real_rate = rate
         self._real_burst = burst
 
-    def _make_t(self, xs, center, deg, scale):
-        return [stats.t.pdf(x, deg, center, scale) for x in xs]
+    def compute_distribution(self, xs, mu, sigma, scale):
+        def pdf(x):
+            return math.exp(-(x-mu)**2/(2*sigma**2))/math.sqrt(2*math.pi*sigma)
+        return [pdf(x) * scale for x in xs]
 
     @property
     def rate(self):
