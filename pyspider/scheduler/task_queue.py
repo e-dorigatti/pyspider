@@ -14,7 +14,8 @@ try:
     from UserDict import DictMixin
 except ImportError:
     from collections import Mapping as DictMixin
-from .token_bucket import Bucket
+#from .token_bucket import Bucket
+from .dynamic_token_bucket import DynamicBucket as Bucket
 logger = logging.getLogger('scheduler')
 
 try:
