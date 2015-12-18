@@ -18,13 +18,7 @@ class ProjectDB(MySQLMixin, BaseProjectDB, BaseDB):
 
     def __init__(self, host='localhost', port=3306, database='projectdb',
                  user='root', passwd=None):
-        self.database_name = database
-        self.conn = mysql.connector.connect(user=user, password=passwd,
-                                            host=host, port=port, autocommit=True)
-        if database not in [x[0] for x in self._execute('show databases')]:
-            self._execute('CREATE DATABASE %s' % self.escape(database))
-        self.conn.database = database
-
+        super(ProjectDB, self).__init__(host, port, database, user, passwd, "projectdb_pool")
         self._execute('''CREATE TABLE IF NOT EXISTS %s (
             `name` varchar(64) PRIMARY KEY,
             `group` varchar(64),

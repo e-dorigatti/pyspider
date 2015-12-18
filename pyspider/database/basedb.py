@@ -93,9 +93,9 @@ class BaseDB:
         if values:
             _keys = ", ".join((self.escape(k) for k in values))
             _values = ", ".join([self.placeholder, ] * len(values))
-            sql_query = "INSERT INTO %s (%s) VALUES (%s)" % (tablename, _keys, _values)
+            sql_query = "REPLACE INTO %s (%s) VALUES (%s)" % (tablename, _keys, _values)
         else:
-            sql_query = "INSERT INTO %s DEFAULT VALUES" % tablename
+            sql_query = "REPLACE INTO %s DEFAULT VALUES" % tablename
         logger.debug("<sql: %s>", sql_query)
 
         if values:
