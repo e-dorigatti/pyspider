@@ -58,6 +58,7 @@ def new_task(project):
 
     return jsonify(task)
 
+
 @app.route('/task/<taskid>/resubmit')
 def submit_task(taskid):
     if ':' not in taskid:
@@ -69,8 +70,11 @@ def submit_task(taskid):
     if not task:
         abort(404)
 
+    schedule = task.get('schedule', {})
+    schedule['force_update'] = True
+    task['schedule'] = schedule
     rpc = app.config['scheduler_rpc']
-    rpc.newtask(task)
+    rpc.newtask(json.dumps(task))
 
     return jsonify(task)
 

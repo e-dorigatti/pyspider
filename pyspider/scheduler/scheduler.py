@@ -544,6 +544,8 @@ class Scheduler(object):
         server.register_function(dump_counter, 'counter')
 
         def new_task(task):
+            if type(task) in {str, unicode}:
+                task = json.loads(task)
             if self.task_verify(task):
                 self.newtask_queue.put(task)
                 return True
