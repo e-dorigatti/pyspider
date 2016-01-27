@@ -5,7 +5,7 @@ MAINTAINER binux <roy@binux.me>
 RUN apt-get update && \
     apt-get install -y python python-dev python-distribute python-pip pdftohtml && \
     apt-get install -y libcurl4-openssl-dev libxml2-dev libxslt1-dev python-lxml && \
-    apt-get install -y libffi-dev wget
+    apt-get install -y libffi-dev libpq-dev wget
 
 # install requirements
 ADD requirements.txt /opt/pyspider/requirements.txt
