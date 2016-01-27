@@ -74,6 +74,11 @@ def every(minutes=NOTSET, seconds=NOTSET):
         # collected into the list Handler._cron_jobs by meta class
         func.is_cronjob = True
 
+        # collect interval and unify to seconds, it's used in meta class. See the
+        # comments in meta class.
+        func.tick = minutes * 60 + seconds
+        return func
+
     if inspect.isfunction(minutes):
         func = minutes
         minutes = 1
@@ -153,7 +158,6 @@ class BaseHandler(object):
         """
         process = task.get('process', {})
         callback = process.get('callback', '__call__')
-        print self, self.__dict__
         if not hasattr(self, callback):
             raise NotImplementedError("self.%s() not implemented!" % callback)
 
@@ -421,6 +425,6 @@ class BaseHandler(object):
                     self.retry_delay = {'': self.retry_delay}
                 self.save[each] = self.retry_delay
                 self.save[each] = self._min_tick
-        result.save['crawl_frequency'] = self.crawl_frequency
-        result.save['scraper_schedule'] = self.scraper_schedule
+        self.save['crawl_frequency'] = self.crawl_frequency
+        self.save['scraper_schedule'] = self.scraper_schedule
         #self.crawl('data:,on_get_info', save=result)
