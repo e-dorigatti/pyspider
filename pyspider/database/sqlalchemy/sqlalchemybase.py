@@ -5,18 +5,13 @@
 #         http://binux.me
 # Created on 2014-12-04 18:48:47
 
-import six
 import time
-from sqlalchemy.engine import reflection
 
 
 def result2dict(columns, task):
     r = {}
-    for c, t in zip(columns, task):
-        if isinstance(c, six.string_types):
-            r[c] = t
-        else:
-            r[c.name] = t
+    for key in task.keys():
+        r[key] = task[key]
     return r
 
 
@@ -48,8 +43,7 @@ class SplitTableMixin(object):
         else:
             prefix = ''
 
-        insp = reflection.Inspector.from_engine(self.engine)
-        for project in insp.get_table_names():
+        for project in self.engine.table_names():
             if project.startswith(prefix):
                 project = project[len(prefix):]
                 self.projects.add(project)

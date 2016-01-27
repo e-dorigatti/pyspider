@@ -12,12 +12,12 @@ import time
 import logging
 import itertools
 import datetime
-from six.moves import queue as Queue
 from collections import deque
 
 from six import iteritems, itervalues
 
 from pyspider.libs import counter, utils
+from six.moves import queue as Queue
 from .task_queue import TaskQueue
 logger = logging.getLogger('scheduler')
 
@@ -37,6 +37,13 @@ class Scheduler(object):
     INQUEUE_LIMIT = 0
     EXCEPTION_LIMIT = 3
     DELETE_TIME = 24 * 60 * 60
+    DEFAULT_RETRY_DELAY = {
+        0: 30,
+        1: 1*60*60,
+        2: 6*60*60,
+        3: 12*60*60,
+        '': 24*60*60
+    }
 
     def __init__(self, taskdb, projectdb, newtask_queue, status_queue,
                  out_queue, data_path='./data', resultdb=None):
@@ -93,6 +100,7 @@ class Scheduler(object):
         if project['name'] not in self.projects:
             self.projects[project['name']] = {}
         self.projects[project['name']].update(project)
+        self.projects[project['name']]['md5sum'] = utils.md5string(project['script'])
         if not self.projects[project['name']].get('active_tasks', None):
             self.projects[project['name']]['active_tasks'] = deque(maxlen=self.ACTIVE_TASKS)
 
@@ -103,26 +111,28 @@ class Scheduler(object):
             self.task_queue[project['name']].rate = project['rate']
             self.task_queue[project['name']].burst = project['burst']
 
-            # update project runtime info from processing by sending a on_get_info request,
-            # result is catched by on_request
-            self.send_task({
+            # update project runtime info from processor by sending a _on_get_info
+            # request, result is in status_page.track.save
+            self.on_select_task({
                 'taskid': '_on_get_info',
                 'project': project['name'],
                 'url': 'data:,_on_get_info',
-                'status': self.taskdb.ACTIVE,
+                'status': self.taskdb.SUCCESS,
                 'fetch': {
-                    'save': ['min_tick', ],
+                    'save': ['min_tick', 'retry_delay'],
                 },
                 'process': {
                     'callback': '_on_get_info',
                 },
-                'project_updatetime': self.projects[project['name']].get('updatetime', 0),
             })
         else:
             if project['name'] in self.task_queue:
                 self.task_queue[project['name']].rate = 0
                 self.task_queue[project['name']].burst = 0
                 del self.task_queue[project['name']]
+
+            if project not in self._cnt['all']:
+                self._update_project_cnt(project['name'])
 
     scheduler_task_fields = ['taskid', 'project', 'schedule', ]
 
@@ -137,6 +147,7 @@ class Scheduler(object):
             priority = _schedule.get('priority', self.default_schedule['priority'])
             exetime = _schedule.get('exetime', self.default_schedule['exetime'])
             self.task_queue[project].put(taskid, priority, exetime)
+        logger.debug('project: %s loaded %d tasks.', project, len(self.task_queue[project]))
 
         if self.projects[project]['status'] in ('RUNNING', 'DEBUG'):
             self.task_queue[project].rate = self.projects[project]['rate']
@@ -146,16 +157,23 @@ class Scheduler(object):
             self.task_queue[project].burst = 0
 
         if project not in self._cnt['all']:
-            status_count = self.taskdb.status_count(project)
-            self._cnt['all'].value(
-                (project, 'success'),
-                status_count.get(self.taskdb.SUCCESS, 0)
-            )
-            self._cnt['all'].value(
-                (project, 'failed'),
-                status_count.get(self.taskdb.FAILED, 0) + status_count.get(self.taskdb.BAD, 0)
-            )
+            self._update_project_cnt(project)
         self._cnt['all'].value((project, 'pending'), len(self.task_queue[project]))
+
+    def _update_project_cnt(self, project):
+        status_count = self.taskdb.status_count(project)
+        self._cnt['all'].value(
+            (project, 'success'),
+            status_count.get(self.taskdb.SUCCESS, 0)
+        )
+        self._cnt['all'].value(
+            (project, 'failed'),
+            status_count.get(self.taskdb.FAILED, 0) + status_count.get(self.taskdb.BAD, 0)
+        )
+        self._cnt['all'].value(
+            (project, 'pending'),
+            status_count.get(self.taskdb.ACTIVE, 0)
+        )
 
     def task_verify(self, task):
         '''
@@ -206,9 +224,16 @@ class Scheduler(object):
         '''Check status queue'''
         cnt = 0
         try:
-            while cnt < self.LOOP_LIMIT:
+            while True:
                 task = self.status_queue.get_nowait()
-                if not self.task_verify(task):
+                # check _on_get_info result here
+                if task.get('taskid') == '_on_get_info' and 'project' in task and 'track' in task:
+                    self.projects[task['project']].update(task['track'].get('save') or {})
+                    logger.info(
+                        '%s on_get_info %r', task['project'], task['track'].get('save', {})
+                    )
+                    continue
+                elif not self.task_verify(task):
                     continue
                 self.on_task_status(task)
                 cnt += 1
@@ -220,35 +245,20 @@ class Scheduler(object):
 
     def _check_request(self):
         '''Check new task queue'''
-        cnt = 0
-        while cnt < self.LOOP_LIMIT:
+        tasks = {}
+        while len(tasks) < self.LOOP_LIMIT:
             try:
                 task = self.newtask_queue.get_nowait()
             except Queue.Empty:
-                return cnt
+                break
 
             if isinstance(task, list):
-                tasks = task
+                _tasks = task
             else:
-                tasks = (task, )
+                _tasks = (task, )
 
-            for task in tasks:
+            for task in _tasks:
                 if not self.task_verify(task):
-                    continue
-
-                # check _on_get_info result here
-                if task['url'] == 'data:,on_get_info':
-                    self.projects[task['project']].update(task['fetch'].get('save', {}))
-                    logger.info(
-                        '%s on_get_info %r', task['project'], task['fetch'].get('save', {})
-                    )
-                    continue
-
-                if (
-                        self.INQUEUE_LIMIT
-                        and len(self.task_queue[task['project']]) >= self.INQUEUE_LIMIT
-                ):
-                    logger.debug('overflow task %(project)s:%(taskid)s %(url)s', task)
                     continue
 
                 if task['taskid'] in self.task_queue[task['project']]:
@@ -256,14 +266,16 @@ class Scheduler(object):
                         logger.debug('ignore newtask %(project)s:%(taskid)s %(url)s', task)
                         continue
 
-                oldtask = self.taskdb.get_task(task['project'], task['taskid'],
-                                               fields=self.merge_task_fields)
-                if oldtask:
-                    task = self.on_old_request(task, oldtask)
-                else:
-                    task = self.on_new_request(task)
-                cnt += 1
-        return cnt
+                if task['taskid'] in tasks:
+                    if not task.get('schedule', {}).get('force_update', False):
+                        continue
+
+                tasks[task['taskid']] = task
+
+        for task in itervalues(tasks):
+            self.on_request(task)
+
+        return len(tasks)
 
     def _check_cronjob(self):
         """Check projects cronjob tick, return True when a new tick is sended"""
@@ -327,6 +339,7 @@ class Scheduler(object):
         'project',
         'url',
         'status',
+        'schedule',
         'fetch',
         'process',
         'track',
@@ -344,27 +357,42 @@ class Scheduler(object):
                 self._send_buffer.append(_task)
                 break
 
+        if self.out_queue.full():
+            return {}
+
+        taskids = []
+        cnt = 0
         cnt_dict = dict()
+        limit = self.LOOP_LIMIT
         for project, task_queue in iteritems(self.task_queue):
+            if cnt >= limit:
+                break
+
             # task queue
             self.task_queue[project].check_update()
-            cnt = 0
+            project_cnt = 0
 
             # check send_buffer here. when not empty, out_queue may blocked. Not sending tasks
-            while cnt < self.LOOP_LIMIT / 10 and not self._send_buffer:
+            while cnt < limit and project_cnt < limit / 10:
                 taskid = task_queue.get()
                 if not taskid:
                     break
-                task = self.taskdb.get_task(project, taskid, fields=self.request_task_fields)
-                if not task:
-                    continue
 
-                # inform processor project may updated
-                task['project_updatetime'] = self.projects[project].get('updatetime', 0)
-                task = self.on_select_task(task)
+                taskids.append((project, taskid))
+                project_cnt += 1
                 cnt += 1
-            cnt_dict[project] = cnt
+            cnt_dict[project] = project_cnt
+
+        for project, taskid in taskids:
+            self._load_put_task(project, taskid)
+
         return cnt_dict
+
+    def _load_put_task(self, project, taskid):
+        task = self.taskdb.get_task(project, taskid, fields=self.request_task_fields)
+        if not task:
+            return
+        task = self.on_select_task(task)
 
     def _print_counter_log(self):
         # print top 5 active counters
@@ -492,7 +520,6 @@ class Scheduler(object):
                 "callback": "on_start",
             },
         })
-
         self.newtask_queue.put(task)
 
     def xmlrpc_run(self, port=23333, bind='127.0.0.1', logRequests=False):
@@ -556,7 +583,7 @@ class Scheduler(object):
             result = []
 
             while len(result) < limit and tasks and not all(x is None for x in tasks):
-                updatetime, task = t = max(tasks)
+                updatetime, task = t = max(t for t in tasks if t)
                 i = tasks.index(t)
                 tasks[i] = next(iters[i], None)
                 for key in list(task):
@@ -580,6 +607,18 @@ class Scheduler(object):
         while not self._quit:
             server.handle_request()
         server.server_close()
+
+    def on_request(self, task):
+        if self.INQUEUE_LIMIT and len(self.task_queue[task['project']]) >= self.INQUEUE_LIMIT:
+            logger.debug('overflow task %(project)s:%(taskid)s %(url)s', task)
+            return
+
+        oldtask = self.taskdb.get_task(task['project'], task['taskid'],
+                                       fields=self.merge_task_fields)
+        if oldtask:
+            return self.on_old_request(task, oldtask)
+        else:
+            return self.on_new_request(task)
 
     def on_new_request(self, task):
         '''Called when a new request is arrived'''
@@ -606,7 +645,7 @@ class Scheduler(object):
         schedule_age = _schedule.get('age', self.default_schedule['age'])
         if _schedule.get('itag') and _schedule['itag'] != old_schedule.get('itag'):
             restart = True
-        elif schedule_age >= 0 and schedule_age + (old_task['lastcrawltime'] or 0) < now:
+        elif schedule_age >= 0 and schedule_age + (old_task.get('lastcrawltime', 0) or 0) < now:
             restart = True
         elif _schedule.get('force_update'):
             restart = True
@@ -660,6 +699,15 @@ class Scheduler(object):
         '''Called when a task is done and success, called by `on_task_status`'''
         task['status'] = self.taskdb.SUCCESS
         task['lastcrawltime'] = time.time()
+
+        if 'schedule' in task:
+            if task['schedule'].get('auto_recrawl') and 'age' in task['schedule']:
+                task['status'] = self.taskdb.ACTIVE
+                next_exetime = task['schedule'].get('age')
+                task['schedule']['exetime'] = time.time() + next_exetime
+                self.put_task(task)
+            else:
+                del task['schedule']
         self.update_task(task)
 
         project = task['project']
@@ -672,18 +720,30 @@ class Scheduler(object):
 
     def on_task_failed(self, task):
         '''Called when a task is failed, called by `on_task_status`'''
-        old_task = self.taskdb.get_task(task['project'], task['taskid'], fields=['schedule'])
-        if old_task is None:
-            logging.error('unknown status pack: %s' % task)
-            return
-        if not task.get('schedule'):
+
+        if 'schedule' not in task:
+            old_task = self.taskdb.get_task(task['project'], task['taskid'], fields=['schedule'])
+            if old_task is None:
+                logging.error('unknown status pack: %s' % task)
+                return
             task['schedule'] = old_task.get('schedule', {})
 
         retries = task['schedule'].get('retries', self.default_schedule['retries'])
         retried = task['schedule'].get('retried', 0)
-        next_exetime = retried * 60
 
-        if retried >= retries:
+        project_info = self.projects.get(task['project'], {})
+        retry_delay = project_info.get('retry_delay', None) or self.DEFAULT_RETRY_DELAY
+        next_exetime = retry_delay.get(retried, retry_delay.get('', self.DEFAULT_RETRY_DELAY['']))
+
+        if task['schedule'].get('auto_recrawl') and 'age' in task['schedule']:
+            next_exetime = min(next_exetime, task['schedule'].get('age'))
+        else:
+            if retried >= retries:
+                next_exetime = -1
+            elif 'age' in task['schedule'] and next_exetime > task['schedule'].get('age'):
+                next_exetime = task['schedule'].get('age')
+
+        if next_exetime < 0:
             task['status'] = self.taskdb.FAILED
             task['lastcrawltime'] = time.time()
             self.update_task(task)
@@ -713,9 +773,16 @@ class Scheduler(object):
 
     def on_select_task(self, task):
         '''Called when a task is selected to fetch & process'''
+        # inject informations about project
         logger.info('select %(project)s:%(taskid)s %(url)s', task)
+
+        project_info = self.projects.get(task['project'])
+        assert project_info, 'no such project'
+        task['group'] = project_info.get('group')
+        task['project_md5sum'] = project_info.get('md5sum')
+        task['project_updatetime'] = project_info.get('updatetime', 0)
+        project_info['active_tasks'].appendleft((time.time(), task))
         self.send_task(task)
-        self.projects[task['project']]['active_tasks'].appendleft((time.time(), task))
         return task
 
 
@@ -783,7 +850,6 @@ class OneScheduler(Scheduler):
                     task = dbtask
 
             # select the task
-            task['project_updatetime'] = self.projects[project].get('updatetime', 0)
             self.on_select_task(task)
             is_crawled.append(True)
 
@@ -883,3 +949,120 @@ class OneScheduler(Scheduler):
     def quit(self):
         self.ioloop.stop()
         logger.info("scheduler exiting...")
+
+
+import random
+import threading
+
+
+class ThreadBaseScheduler(Scheduler):
+    def __init__(self, threads=4, *args, **kwargs):
+        self.threads = threads
+        self.local = threading.local()
+
+        super(ThreadBaseScheduler, self).__init__(*args, **kwargs)
+
+        self._taskdb = self.taskdb
+        self._projectdb = self.projectdb
+        self._resultdb = self.resultdb
+
+        self.thread_objs = []
+        self.thread_queues = []
+        self._start_threads()
+        assert len(self.thread_queues) > 0
+
+    @property
+    def taskdb(self):
+        if not hasattr(self.local, 'taskdb'):
+            self.taskdb = self._taskdb.copy()
+        return self.local.taskdb
+
+    @taskdb.setter
+    def taskdb(self, taskdb):
+        self.local.taskdb = taskdb
+
+    @property
+    def projectdb(self):
+        if not hasattr(self.local, 'projectdb'):
+            self.projectdb = self._projectdb.copy()
+        return self.local.projectdb
+
+    @projectdb.setter
+    def projectdb(self, projectdb):
+        self.local.projectdb = projectdb
+
+    @property
+    def resultdb(self):
+        if not hasattr(self.local, 'resultdb'):
+            self.resultdb = self._resultdb.copy()
+        return self.local.resultdb
+
+    @resultdb.setter
+    def resultdb(self, resultdb):
+        self.local.resultdb = resultdb
+
+    def _start_threads(self):
+        for i in range(self.threads):
+            queue = Queue.Queue()
+            thread = threading.Thread(target=self._thread_worker, args=(queue, ))
+            thread.daemon = True
+            thread.start()
+            self.thread_objs.append(thread)
+            self.thread_queues.append(queue)
+
+    def _thread_worker(self, queue):
+        while True:
+            method, args, kwargs = queue.get()
+            try:
+                method(*args, **kwargs)
+            except Exception as e:
+                logger.exception(e)
+
+    def _run_in_thread(self, method, *args, **kwargs):
+        i = kwargs.pop('_i', None)
+        block = kwargs.pop('_block', False)
+
+        if i is None:
+            while True:
+                for queue in self.thread_queues:
+                    if queue.empty():
+                        break
+                else:
+                    if block:
+                        time.sleep(0.1)
+                        continue
+                    else:
+                        queue = self.thread_queues[random.randint(0, len(self.thread_queues)-1)]
+                break
+        else:
+            queue = self.thread_queues[i % len(self.thread_queues)]
+
+        queue.put((method, args, kwargs))
+
+        if block:
+            self._wait_thread()
+
+    def _wait_thread(self):
+        while True:
+            if all(queue.empty() for queue in self.thread_queues):
+                break
+            time.sleep(0.1)
+
+    def _update_project(self, project):
+        self._run_in_thread(Scheduler._update_project, self, project)
+
+    def on_task_status(self, task):
+        i = hash(task['taskid'])
+        self._run_in_thread(Scheduler.on_task_status, self, task, _i=i)
+
+    def on_request(self, task):
+        i = hash(task['taskid'])
+        self._run_in_thread(Scheduler.on_request, self, task, _i=i)
+
+    def _load_put_task(self, project, taskid):
+        i = hash(taskid)
+        self._run_in_thread(Scheduler._load_put_task, self, project, taskid, _i=i)
+
+    def run_once(self):
+        super(ThreadBaseScheduler, self).run_once()
+        self._wait_thread()

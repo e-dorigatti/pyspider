@@ -138,6 +138,7 @@ def format_date(date, gmt_offset=0, relative=True, shorter=False, full_format=Fa
         "weekday": local_date.strftime("%A"),
         "day": str(local_date.day),
         "year": str(local_date.year),
+        "month": local_date.month,
         "time": str_time
     }
 
@@ -200,7 +201,7 @@ def utf8(string):
     elif isinstance(string, six.binary_type):
         return string
     else:
-        return unicode(string).encode('utf8')
+        return six.text_type(string).encode('utf8')
 
 
 def text(string, encoding='utf8'):
@@ -226,7 +227,7 @@ def pretty_unicode(string):
     try:
         return string.decode("utf8")
     except UnicodeDecodeError:
-        return string.decode('Latin-1').encode('unicode_escape')
+        return string.decode('Latin-1').encode('unicode_escape').decode("utf8")
 
 
 def unicode_string(string):
@@ -249,7 +250,7 @@ def unicode_dict(_dict):
     """
     r = {}
     for k, v in iteritems(_dict):
-        r[unicode_string(k)] = unicode_obj(v)
+        r[unicode_obj(k)] = unicode_obj(v)
     return r
 
 

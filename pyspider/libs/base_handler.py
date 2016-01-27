@@ -70,19 +70,9 @@ def every(minutes=NOTSET, seconds=NOTSET):
     method will been called every minutes or seconds
     """
     def wrapper(func):
-        @functools.wraps(func)
-        def on_cronjob(self, response, task):
-            if (
-                    response.save
-                    and 'tick' in response.save
-                    and response.save['tick'] % (minutes * 60 + seconds) != 0
-            ):
-                return None
-            function = func.__get__(self, self.__class__)
-            return self._run_func(function, response, task)
-        on_cronjob.is_cronjob = True
-        on_cronjob.tick = minutes * 60 + seconds
-        return on_cronjob
+        # mark the function with variable 'is_cronjob=True', the function would be
+        # collected into the list Handler._cron_jobs by meta class
+        func.is_cronjob = True
 
     if inspect.isfunction(minutes):
         func = minutes
@@ -105,7 +95,13 @@ def every(minutes=NOTSET, seconds=NOTSET):
 class BaseHandlerMeta(type):
 
     def __new__(cls, name, bases, attrs):
+        # A list of all functions which is marked as 'is_cronjob=True'
         cron_jobs = []
+
+        # The min_tick is the greatest common divisor(GCD) of the interval of cronjobs
+        # this value would be queried by scheduler when the project initial loaded.
+        # Scheudler may only send _on_cronjob task every min_tick seconds. It can reduce
+        # the number of tasks sent from scheduler.
         min_tick = 0
 
         for each in attrs.values():
@@ -132,6 +128,7 @@ class BaseHandler(object):
     __env__ = {'not_inited': True}
     crawl_frequency = 0  # seconds
     scraper_schedule = None  # dict with lists weekdays, days, hours, minutes
+    retry_delay = {}
 
     def _reset(self):
         """
@@ -154,11 +151,9 @@ class BaseHandler(object):
         Finding callback specified by `task['callback']`
         raising status error for it if needed.
         """
-        self._reset()
-        if isinstance(response, dict):
-            response = rebuild_response(response)
         process = task.get('process', {})
         callback = process.get('callback', '__call__')
+        print self, self.__dict__
         if not hasattr(self, callback):
             raise NotImplementedError("self.%s() not implemented!" % callback)
 
@@ -179,11 +174,15 @@ class BaseHandler(object):
         exception = None
         stdout = sys.stdout
         self.task = task
+        if isinstance(response, dict):
+            response = rebuild_response(response)
         self.response = response
+        self.save = (task.get('track') or {}).get('save', {})
 
         try:
             if self.__env__.get('enable_stdout_capture', True):
                 sys.stdout = ListO(module.log_buffer)
+            self._reset()
             result = self._run_task(task, response)
             if inspect.isgenerator(result):
                 for r in result:
@@ -194,16 +193,19 @@ class BaseHandler(object):
             logger.exception(e)
             exception = e
         finally:
-            self.task = None
-            self.response = None
-            sys.stdout = stdout
             follows = self._follows
             messages = self._messages
             logs = list(module.log_buffer)
             extinfo = self._extinfo
+            save = self.save
+
+            sys.stdout = stdout
+            self.task = None
+            self.response = None
+            self.save = None
 
         module.log_buffer[:] = []
-        return ProcessorResult(result, follows, messages, logs, exception, extinfo)
+        return ProcessorResult(result, follows, messages, logs, exception, extinfo, save)
 
     def _crawl(self, url, **kwargs):
         """
@@ -212,6 +214,8 @@ class BaseHandler(object):
         checking kwargs, and repack them to each sub-dict
         """
         task = {}
+
+        assert len(url) < 1024, "Maximum (1024) URL length error."
 
         if kwargs.get('callback'):
             callback = kwargs['callback']
@@ -224,10 +228,16 @@ class BaseHandler(object):
                 raise NotImplementedError("self.%s() not implemented!" % callback)
             if hasattr(func, '_config'):
                 for k, v in iteritems(func._config):
-                    kwargs.setdefault(k, v)
+                    if isinstance(v, dict) and isinstance(kwargs.get(k), dict):
+                        kwargs[k].update(v)
+                    else:
+                        kwargs.setdefault(k, v)
 
         for k, v in iteritems(self.crawl_config):
-            kwargs.setdefault(k, v)
+            if isinstance(v, dict) and isinstance(kwargs.get(k), dict):
+                kwargs[k].update(v)
+            else:
+                kwargs.setdefault(k, v)
 
         url = quote_chinese(_build_url(url.strip(), kwargs.pop('params', None)))
         if kwargs.get('files'):
@@ -244,7 +254,8 @@ class BaseHandler(object):
             kwargs.setdefault('method', 'POST')
 
         schedule = {}
-        for key in ('priority', 'retries', 'exetime', 'age', 'itag', 'force_update'):
+        for key in ('priority', 'retries', 'exetime', 'age', 'itag', 'force_update',
+                    'auto_recrawl'):
             if key in kwargs:
                 schedule[key] = kwargs.pop(key)
         task['schedule'] = schedule
@@ -263,9 +274,14 @@ class BaseHandler(object):
                 'save',
                 'js_run_at',
                 'js_script',
+                'js_viewport_width',
+                'js_viewport_height',
                 'load_images',
                 'fetch_type',
                 'use_gzip',
+                'validate_cert',
+                'max_redirects',
+                'robots_txt'
         ):
             if key in kwargs:
                 fetch[key] = kwargs.pop(key)
@@ -300,7 +316,7 @@ class BaseHandler(object):
     # apis
     def crawl(self, url, **kwargs):
         '''
-        avalable params:
+        available params:
           url
           callback
 
@@ -315,10 +331,13 @@ class BaseHandler(object):
           proxy
           etag
           last_modifed
+          auto_recrawl
 
           fetch_type
           js_run_at
           js_script
+          js_viewport_width
+          js_viewport_height
           load_images
 
           priority
@@ -376,18 +395,32 @@ class BaseHandler(object):
 
     @not_send_status
     def _on_cronjob(self, response, task):
+        if (not response.save
+                or not isinstance(response.save, dict)
+                or 'tick' not in response.save):
+            return
+
+        # When triggered, a '_on_cronjob' task is sent from scheudler with 'tick' in
+        # Response.save. Scheduler may at least send the trigger task every GCD of the
+        # inverval of the cronjobs. The method should check the tick for each cronjob
+        # function to confirm the execute interval.
         for cronjob in self._cron_jobs:
+            if response.save['tick'] % cronjob.tick != 0:
+                continue
             function = cronjob.__get__(self, self.__class__)
             self._run_func(function, response, task)
 
     @not_send_status
     def _on_get_info(self, response, task):
         """Sending runtime infomation about this script."""
-        result = {}
-        assert response.save
-        for each in response.save:
+        for each in response.save or []:
             if each == 'min_tick':
-                result[each] = self._min_tick
-        result['crawl_frequency'] = self.crawl_frequency
-        result['scraper_schedule'] = self.scraper_schedule
-        self.crawl('data:,on_get_info', save=result)
+                self.save[each] = self._min_tick
+            elif each == 'retry_delay':
+                if not isinstance(self.retry_delay, dict):
+                    self.retry_delay = {'': self.retry_delay}
+                self.save[each] = self.retry_delay
+                self.save[each] = self._min_tick
+        result.save['crawl_frequency'] = self.crawl_frequency
+        result.save['scraper_schedule'] = self.scraper_schedule
+        #self.crawl('data:,on_get_info', save=result)

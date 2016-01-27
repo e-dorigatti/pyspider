@@ -6,7 +6,6 @@
 # Created on 2014-02-23 00:19:06
 
 
-import re
 import sys
 import time
 import socket
@@ -18,7 +17,7 @@ from flask.ext import login
 
 from pyspider.libs import utils, sample_handler, dataurl
 from pyspider.libs.response import rebuild_response
-from pyspider.processor.project_module import ProjectManager, ProjectFinder, ProjectLoader
+from pyspider.processor.project_module import ProjectManager, ProjectFinder
 from .app import app
 
 default_task = {
@@ -32,24 +31,19 @@ default_task = {
 default_script = inspect.getsource(sample_handler)
 
 
-def verify_project_name(project):
-    if re.search(r"[^\w]", project):
-        return False
-    return True
-
-
-@app.route('/debug/<project>')
+@app.route('/debug/<project>', methods=['GET', 'POST'])
 def debug(project):
-    if not verify_project_name(project):
-        return 'project name is not allowed!', 400
     projectdb = app.config['projectdb']
-    info = projectdb.get(project)
+    if not projectdb.verify_project_name(project):
+        return 'project name is not allowed!', 400
+    info = projectdb.get(project, fields=['name', 'script'])
     if info:
         script = info['script']
     else:
         script = (default_script
                   .replace('__DATE__', datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-                  .replace('__PROJECT_NAME__', project))
+                  .replace('__PROJECT_NAME__', project)
+                  .replace('__START_URL__', request.values.get('start-urls') or '__START_URL__'))
 
     taskid = request.args.get('taskid')
     if taskid:
@@ -65,13 +59,7 @@ def debug(project):
 
 @app.before_first_request
 def enable_projects_import():
-    class DebuggerProjectFinder(ProjectFinder):
-
-        def get_loader(self, name):
-            info = app.config['projectdb'].get(name)
-            if info:
-                return ProjectLoader(info)
-    sys.meta_path.append(DebuggerProjectFinder())
+    sys.meta_path.append(ProjectFinder(app.config['projectdb']))
 
 
 @app.route('/debug/<project>/run', methods=['POST', ])
@@ -88,13 +76,30 @@ def run(project):
             'result': None,
             'time': time.time() - start_time,
         }
-        return json.dumps(utils.unicode_obj(result)), 200, {'Content-Type': 'application/json'}
+        return json.dumps(utils.unicode_obj(result)), \
+            200, {'Content-Type': 'application/json'}
 
     project_info = {
         'name': project,
         'status': 'DEBUG',
         'script': request.form['script'],
     }
+
+    if request.form.get('webdav_mode') == 'true':
+        projectdb = app.config['projectdb']
+        info = projectdb.get(project, fields=['name', 'script'])
+        if not info:
+            result = {
+                'fetch_result': "",
+                'logs': u' in wevdav mode, cannot load script',
+                'follows': [],
+                'messages': [],
+                'result': None,
+                'time': time.time() - start_time,
+            }
+            return json.dumps(utils.unicode_obj(result)), \
+                200, {'Content-Type': 'application/json'}
+        project_info['script'] = info['script']
 
     fetch_result = {}
     try:
@@ -151,9 +156,9 @@ def run(project):
 
 @app.route('/debug/<project>/save', methods=['POST', ])
 def save(project):
-    if not verify_project_name(project):
-        return 'project name is not allowed!', 400
     projectdb = app.config['projectdb']
+    if not projectdb.verify_project_name(project):
+        return 'project name is not allowed!', 400
     script = request.form['script']
     project_info = projectdb.get(project, fields=['name', 'status', 'group'])
     if project_info and 'lock' in projectdb.split_group(project_info.get('group')) \
@@ -186,6 +191,16 @@ def save(project):
             return 'rpc error', 200
 
     return 'ok', 200
+
+
+@app.route('/debug/<project>/get')
+def get_script(project):
+    projectdb = app.config['projectdb']
+    if not projectdb.verify_project_name(project):
+        return 'project name is not allowed!', 400
+    info = projectdb.get(project, fields=['name', 'script'])
+    return json.dumps(utils.unicode_obj(info)), \
+        200, {'Content-Type': 'application/json'}
 
 
 @app.route('/helper.js')

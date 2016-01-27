@@ -133,6 +133,7 @@ class TestRun(unittest.TestCase):
             del os.environ['MONGODB_PORT_27017_TCP_ADDR']
             del os.environ['MONGODB_PORT_27017_TCP_PORT']
 
+    @unittest.skip('noly available in docker')
     @unittest.skipIf(os.environ.get('IGNORE_MYSQL'), 'no mysql server for test.')
     def test_70_docker_mysql(self):
         try:
@@ -153,7 +154,7 @@ class TestRun(unittest.TestCase):
     def test_80_docker_phantomjs(self):
         try:
             os.environ['PHANTOMJS_NAME'] = 'phantomjs'
-            os.environ['PHANTOMJS_PORT'] = 'tpc://binux:25678'
+            os.environ['PHANTOMJS_PORT_25555_TCP'] = 'tpc://binux:25678'
             ctx = run.cli.make_context('test', [], None,
                                        obj=dict(testing_mode=True))
             ctx = run.cli.invoke(ctx)
@@ -162,7 +163,7 @@ class TestRun(unittest.TestCase):
             self.assertIsNone(e)
         finally:
             del os.environ['PHANTOMJS_NAME']
-            del os.environ['PHANTOMJS_PORT']
+            del os.environ['PHANTOMJS_PORT_25555_TCP']
 
     def test_90_docker_scheduler(self):
         try:
@@ -192,7 +193,7 @@ class TestRun(unittest.TestCase):
             '--resultdb', 'sqlite+resultdb:///data/tests/all_test_result.db',
             '--projectdb', 'local+projectdb://'+inspect.getsourcefile(data_sample_handler),
             'all',
-        ], close_fds=True)
+        ], close_fds=True, preexec_fn=os.setsid)
 
 
         try:
@@ -226,10 +227,9 @@ class TestRun(unittest.TestCase):
         except:
             raise
         finally:
-            while p.returncode is None:
-                time.sleep(1)
-                p.send_signal(signal.SIGINT)
-                p.poll()
+            time.sleep(1)
+            os.killpg(p.pid, signal.SIGTERM)
+            p.wait()
 
     def test_a110_one(self):
         pid, fd = os.forkpty()

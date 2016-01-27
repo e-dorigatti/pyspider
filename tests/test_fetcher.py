@@ -12,7 +12,6 @@ import time
 import umsgpack
 import subprocess
 import unittest2 as unittest
-from multiprocessing import Queue
 
 import logging
 import logging.config
@@ -23,6 +22,7 @@ try:
 except ImportError:
     import xmlrpclib as xmlrpc_client
 from pyspider.libs import utils
+from pyspider.libs.multiprocessing_queue import Queue
 from pyspider.libs.response import rebuild_response
 from pyspider.fetcher.tornado_fetcher import Fetcher
 
@@ -322,3 +322,52 @@ class TestFetcher(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, result)
         self.assertEqual(response.cookies, {'a': 'b', 'k1': 'v1', 'k2': 'v2', 'c': 'd'}, result)
+
+    def test_a170_validate_cert(self):
+        request = copy.deepcopy(self.sample_task_http)
+        request['fetch']['validate_cert'] = False
+        request['url'] = self.httpbin+'/get'
+        result = self.fetcher.sync_fetch(request)
+        response = rebuild_response(result)
+
+        self.assertEqual(response.status_code, 200, result)
+
+    def test_a180_max_redirects(self):
+        request = copy.deepcopy(self.sample_task_http)
+        request['fetch']['max_redirects'] = 10
+        request['url'] = self.httpbin+'/redirect/10'
+        result = self.fetcher.sync_fetch(request)
+        response = rebuild_response(result)
+
+        self.assertEqual(response.status_code, 200, result)
+
+    def test_a200_robots_txt(self):
+        request = copy.deepcopy(self.sample_task_http)
+        request['fetch']['robots_txt'] = False
+        request['url'] = self.httpbin+'/deny'
+        result = self.fetcher.sync_fetch(request)
+        response = rebuild_response(result)
+
+        self.assertEqual(response.status_code, 200, result)
+
+        request['fetch']['robots_txt'] = True
+        result = self.fetcher.sync_fetch(request)
+        response = rebuild_response(result)
+
+        self.assertEqual(response.status_code, 403, result)
+
+    def test_zzzz_issue375(self):
+        phantomjs_proxy = self.fetcher.phantomjs_proxy
+        self.fetcher.phantomjs_proxy = '127.0.0.1:20000'
+
+        if not self.phantomjs:
+            raise unittest.SkipTest('no phantomjs')
+        request = copy.deepcopy(self.sample_task_http)
+        request['url'] = self.httpbin + '/get'
+        request['fetch']['fetch_type'] = 'js'
+        result = self.fetcher.sync_fetch(request)
+        response = rebuild_response(result)
+
+        self.assertEqual(response.status_code, 599, result)
+
+        self.fetcher.phantomjs_proxy = phantomjs_proxy

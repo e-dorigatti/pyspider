@@ -18,10 +18,11 @@ index_fields = ['name', 'group', 'status', 'comments', 'rate', 'burst', 'updatet
 @app.route('/')
 def index():
     projectdb = app.config['projectdb']
-    projects = projectdb.get_all(fields=index_fields)
-
+    projects = sorted(projectdb.get_all(fields=index_fields),
+                      key=lambda k: (0 if k['group'] else 1, k['group'], k['name']))
     return render_template("index.html", projects=projects)
 
+    return render_template("index.html", projects=projectdb.get_all(fields=index_fields))
 
 @app.route('/queues')
 def get_queues():
@@ -30,8 +31,6 @@ def get_queues():
             return 'None'
         try:
             return queue.qsize()
-        except NotImplementedError:
-            return 'Not Available For OSX'
         except Exception as e:
             return "%r" % e
 

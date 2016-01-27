@@ -5,7 +5,6 @@
 #         http://binux.me
 # Created on 2012-11-15 17:27:54
 
-import six
 import time
 import socket
 import select
@@ -14,28 +13,36 @@ import umsgpack
 import threading
 
 import amqp
-import pika
-import pika.exceptions
-from six.moves import queue as BaseQueue
 from six.moves.urllib.parse import unquote
 try:
     from urllib import parse as urlparse
 except ImportError:
     import urlparse
+from six.moves import queue as BaseQueue
 
 
 def catch_error(func):
     """Catch errors of rabbitmq then reconnect"""
+    import amqp
+    try:
+        import pika.exceptions
+        connect_exceptions = (
+            pika.exceptions.ConnectionClosed,
+            pika.exceptions.AMQPConnectionError,
+        )
+    except ImportError:
+        connect_exceptions = ()
+
+    connect_exceptions += (
+        select.error,
+        socket.error,
+        amqp.ConnectionError
+    )
+
     def wrap(self, *args, **kwargs):
         try:
             return func(self, *args, **kwargs)
-        except (
-                select.error,
-                socket.error,
-                pika.exceptions.ConnectionClosed,
-                pika.exceptions.AMQPConnectionError,
-                amqp.ConnectionError
-        ) as e:
+        except connect_exceptions as e:
             logging.error('RabbitMQ error: %r, reconnect.', e)
             self.reconnect()
             return func(self, *args, **kwargs)
@@ -83,6 +90,9 @@ class PikaQueue(object):
 
     def reconnect(self):
         """Reconnect to rabbitmq server"""
+        import pika
+        import pika.exceptions
+
         self.connection = pika.BlockingConnection(pika.URLParameters(self.amqp_url))
         self.channel = self.connection.channel()
         try:
@@ -216,10 +226,10 @@ class AmqpQueue(PikaQueue):
         parsed = urlparse.urlparse(self.amqp_url)
         port = parsed.port or 5672
         self.connection = amqp.Connection(host="%s:%s" % (parsed.hostname, port),
-                                          userid=parsed.username,
-                                          password=parsed.password,
+                                          userid=parsed.username or 'guest',
+                                          password=parsed.password or 'guest',
                                           virtual_host=unquote(
-                                              parsed.path.lstrip('/')))
+                                              parsed.path.lstrip('/') or '%2F'))
         self.channel = self.connection.channel()
         try:
             self.channel.queue_declare(self.name)

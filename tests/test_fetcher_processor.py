@@ -6,22 +6,17 @@
 # Created on 2015-01-18 14:09:41
 
 import os
-import sys
-import six
-import json
 import time
 import httpbin
 import subprocess
 import unittest2 as unittest
-try:
-    from Queue import Queue
-except ImportError:
-    from queue import Queue
 
 from pyspider.database.local.projectdb import ProjectDB
 from pyspider.fetcher import Fetcher
 from pyspider.processor import Processor
 from pyspider.libs import utils, dataurl
+from six.moves.queue import Queue
+
 
 class TestFetcherProcessor(unittest.TestCase):
 
@@ -149,8 +144,7 @@ class TestFetcherProcessor(unittest.TestCase):
         self.assertStatusOk(status)
         self.assertFalse(newtasks)
 
-        status, newtasks, result = self.crawl(self.httpbin+'/get', method='PATCH',
-                                              callback=self.catch_http_error)
+        status, newtasks, result = self.crawl(self.httpbin+'/get', method='DELETE', callback=self.catch_http_error)
 
         self.assertFalse(self.status_ok(status, 'fetch'))
         self.assertTrue(self.status_ok(status, 'process'))
@@ -290,14 +284,16 @@ class TestFetcherProcessor(unittest.TestCase):
         self.assertFalse(result)
 
     def test_a180_save(self):
-        status, newtasks, result = self.crawl(callback=self.save, save={'roy': 'binux', u'中文': 'value'})
+        status, newtasks, result = self.crawl(callback=self.get_save,
+                                              save={'roy': 'binux', u'中文': 'value'})
 
         self.assertStatusOk(status)
         self.assertFalse(newtasks)
         self.assertEqual(result, {'roy': 'binux', u'中文': 'value'})
 
     def test_a190_taskid(self):
-        status, newtasks, result = self.crawl(callback=self.save, taskid='binux-taskid')
+        status, newtasks, result = self.crawl(callback=self.get_save,
+                                              taskid='binux-taskid')
 
         self.assertStatusOk(status)
         self.assertEqual(status['taskid'], 'binux-taskid')
@@ -379,6 +375,21 @@ class TestFetcherProcessor(unittest.TestCase):
         self.assertStatusOk(status)
         self.assertEqual(result, 200)
 
+    def test_a260_process_save(self):
+        status, newtasks, result = self.crawl(callback=self.set_process_save)
+
+        self.assertStatusOk(status)
+        self.assertIn('roy', status['track']['save'])
+        self.assertEqual(status['track']['save']['roy'], 'binux')
+
+        status, newtasks, result = self.crawl(callback=self.get_process_save,
+                                              track=status['track'])
+
+        self.assertStatusOk(status)
+        self.assertIn('roy', result)
+        self.assertEqual(result['roy'], 'binux')
+
+
     def test_zzz_links(self):
         status, newtasks, result = self.crawl(self.httpbin+'/links/10/0', callback=self.links)
 
@@ -457,3 +468,8 @@ class TestFetcherProcessor(unittest.TestCase):
                 '''curl '%s/put' -X PUT -v -H 'Origin: chrome-extension://hgmloofddffdnphfgcellkdfbfbjeloo' ''' % self.httpbin,
                 callback=self.json)
 
+
+    def test_zzz_robots_txt(self):
+        status, newtasks, result = self.crawl(self.httpbin+'/deny', robots_txt=True, callback=self.catch_http_error)
+
+        self.assertEqual(result, 403)

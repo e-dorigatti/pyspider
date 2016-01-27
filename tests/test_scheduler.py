@@ -95,9 +95,9 @@ try:
     from six.moves import xmlrpc_client
 except ImportError:
     import xmlrpclib as xmlrpc_client
-from multiprocessing import Queue
 from pyspider.scheduler.scheduler import Scheduler
 from pyspider.database.sqlite import taskdb, projectdb, resultdb
+from pyspider.libs.multiprocessing_queue import Queue
 from pyspider.libs.utils import run_in_thread
 
 
@@ -138,7 +138,8 @@ class TestScheduler(unittest.TestCase):
             scheduler.UPDATE_PROJECT_INTERVAL = 0.1
             scheduler.LOOP_INTERVAL = 0.1
             scheduler.INQUEUE_LIMIT = 10
-            Scheduler.DELETE_TIME = 0
+            scheduler.DELETE_TIME = 0
+            scheduler.DEFAULT_RETRY_DELAY = {'': 5}
             scheduler._last_tick = int(time.time())  # not dispatch cronjob
             run_in_thread(scheduler.xmlrpc_run, port=self.scheduler_xmlrpc_port)
             scheduler.run()
@@ -187,6 +188,19 @@ class TestScheduler(unittest.TestCase):
         self.assertIsNotNone(task)
         self.assertEqual(task['url'], 'data:,_on_get_info')
 
+    def test_34_new_not_used_project(self):
+        self.projectdb.insert('test_project_not_started', {
+            'name': 'test_project_not_started',
+            'group': 'group',
+            'status': 'RUNNING',
+            'script': 'import time\nprint(time.time())',
+            'comments': 'test project',
+            'rate': 1.0,
+            'burst': 10,
+        })
+        task = self.scheduler2fetcher.get(timeout=1)
+        self.assertEqual(task['taskid'], '_on_get_info')
+
     def test_35_new_task(self):
         time.sleep(0.2)
         self.newtask_queue.put({
@@ -209,9 +223,10 @@ class TestScheduler(unittest.TestCase):
         self.assertGreater(len(self.rpc.get_active_tasks()), 0)
         self.assertIsNotNone(task)
         self.assertEqual(task['project'], 'test_project')
+        self.assertIn('schedule', task)
         self.assertIn('fetch', task)
         self.assertIn('process', task)
-        self.assertNotIn('schedule', task)
+        self.assertIn('track', task)
         self.assertEqual(task['fetch']['data'], 'abc')
 
     def test_37_force_update_processing_task(self):
@@ -220,7 +235,7 @@ class TestScheduler(unittest.TestCase):
             'project': 'test_project',
             'url': 'url_force_update',
             'schedule': {
-                'age': 0,
+                'age': 10,
                 'force_update': True,
             },
         })
@@ -267,7 +282,10 @@ class TestScheduler(unittest.TestCase):
                 },
             }
         })
-        task = self.scheduler2fetcher.get(timeout=10)
+        from six.moves import queue as Queue
+        with self.assertRaises(Queue.Empty):
+            task = self.scheduler2fetcher.get(timeout=4)
+        task = self.scheduler2fetcher.get(timeout=5)
         self.assertIsNotNone(task)
 
     def test_70_taskdone_ok(self):
@@ -378,7 +396,7 @@ class TestScheduler(unittest.TestCase):
                 },
             }
         })
-        task = self.scheduler2fetcher.get(timeout=10)
+        task = self.scheduler2fetcher.get(timeout=5)
         self.assertIsNotNone(task)
 
         self.status_queue.put({
@@ -394,34 +412,124 @@ class TestScheduler(unittest.TestCase):
                 },
             }
         })
-        time.sleep(0.2)
+
+        from six.moves import queue as Queue
+        with self.assertRaises(Queue.Empty):
+            self.scheduler2fetcher.get(timeout=5)
 
     def test_a30_task_verify(self):
         self.assertFalse(self.rpc.newtask({
-            #'taskid': 'taskid',
+            #'taskid': 'taskid#',
             'project': 'test_project',
             'url': 'url',
         }))
         self.assertFalse(self.rpc.newtask({
-            'taskid': 'taskid',
+            'taskid': 'taskid#',
             #'project': 'test_project',
             'url': 'url',
         }))
         self.assertFalse(self.rpc.newtask({
-            'taskid': 'taskid',
+            'taskid': 'taskid#',
             'project': 'test_project',
             #'url': 'url',
         }))
         self.assertFalse(self.rpc.newtask({
-            'taskid': 'taskid',
+            'taskid': 'taskid#',
             'project': 'not_exist_project',
             'url': 'url',
         }))
         self.assertTrue(self.rpc.newtask({
-            'taskid': 'taskid',
+            'taskid': 'taskid#',
             'project': 'test_project',
             'url': 'url',
         }))
+
+    def test_a40_success_recrawl(self):
+        self.newtask_queue.put({
+            'taskid': 'taskid',
+            'project': 'test_project',
+            'url': 'url',
+            'fetch': {
+                'data': 'abc',
+            },
+            'process': {
+                'data': 'abc',
+            },
+            'schedule': {
+                'age': 0,
+                'retries': 1,
+                'auto_recrawl': True,
+            },
+        })
+        task = self.scheduler2fetcher.get(timeout=10)
+        self.assertIsNotNone(task)
+
+        self.status_queue.put({
+            'taskid': 'taskid',
+            'project': 'test_project',
+            'url': 'url',
+            'schedule': {
+                'age': 0,
+                'retries': 1,
+                'auto_recrawl': True,
+            },
+            'track': {
+                'fetch': {
+                    'ok': True
+                },
+                'process': {
+                    'ok': True
+                },
+            }
+        })
+        task = self.scheduler2fetcher.get(timeout=10)
+        self.assertIsNotNone(task)
+
+    def test_a50_failed_recrawl(self):
+        for i in range(3):
+            self.status_queue.put({
+                'taskid': 'taskid',
+                'project': 'test_project',
+                'url': 'url',
+                'schedule': {
+                    'age': 0,
+                    'retries': 1,
+                    'auto_recrawl': True,
+                },
+                'track': {
+                    'fetch': {
+                        'ok': True
+                    },
+                    'process': {
+                        'ok': False
+                    },
+                }
+            })
+            task = self.scheduler2fetcher.get(timeout=10)
+            self.assertIsNotNone(task)
+
+    def test_a60_disable_recrawl(self):
+        self.status_queue.put({
+            'taskid': 'taskid',
+            'project': 'test_project',
+            'url': 'url',
+            'schedule': {
+                'age': 0,
+                'retries': 1,
+            },
+            'track': {
+                'fetch': {
+                    'ok': True
+                },
+                'process': {
+                    'ok': True
+                },
+            }
+        })
+
+        from six.moves import queue as Queue
+        with self.assertRaises(Queue.Empty):
+            self.scheduler2fetcher.get(timeout=5)
 
     def test_x10_inqueue_limit(self):
         self.projectdb.insert('test_inqueue_project', {
@@ -434,7 +542,7 @@ class TestScheduler(unittest.TestCase):
             'burst': 0,
         })
         time.sleep(0.1)
-        self.assertLess(self.rpc.size(), 10)
+        pre_size = self.rpc.size()
         for i in range(20):
             self.newtask_queue.put({
                 'taskid': 'taskid%d' % i,
@@ -446,11 +554,11 @@ class TestScheduler(unittest.TestCase):
                 },
             })
         time.sleep(1)
-        self.assertEqual(self.rpc.size(), 10)
+        self.assertEqual(self.rpc.size() - pre_size, 10)
 
     def test_x20_delete_project(self):
         self.assertIsNotNone(self.projectdb.get('test_inqueue_project'))
-        self.assertIsNotNone(self.taskdb.get_task('test_inqueue_project', 'taskid1'))
+        #self.assertIsNotNone(self.taskdb.get_task('test_inqueue_project', 'taskid1'))
         self.projectdb.update('test_inqueue_project', status="STOP", group="lock,delete")
         time.sleep(1)
         self.assertIsNone(self.projectdb.get('test_inqueue_project'))
@@ -466,7 +574,7 @@ class TestScheduler(unittest.TestCase):
         self.assertFalse(self.process.is_alive())
         self.assertEqual(
             self.taskdb.get_task('test_project', 'taskid')['status'],
-            self.taskdb.FAILED
+            self.taskdb.SUCCESS
         )
 
 if __name__ == '__main__':

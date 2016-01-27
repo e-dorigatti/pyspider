@@ -22,15 +22,18 @@ if os.name == 'nt':
     mimetypes.add_type("text/css", ".css", True)
 
 
-class TornadoFlask(Flask):
-    """Flask object running with tornado ioloop"""
+class QuitableFlask(Flask):
+    """Add quit() method to Flask object"""
 
     @property
     def logger(self):
         return logger
 
     def run(self, host=None, port=None, debug=None, **options):
-        from werkzeug.serving import make_server, run_with_reloader
+        import tornado.wsgi
+        import tornado.ioloop
+        import tornado.httpserver
+        import tornado.web
 
         if host is None:
             host = '127.0.0.1'
@@ -43,7 +46,6 @@ class TornadoFlask(Flask):
         if debug is not None:
             self.debug = bool(debug)
 
-        #run_simple(host, port, self, **options)
         hostname = host
         port = port
         application = self
@@ -54,31 +56,44 @@ class TornadoFlask(Flask):
             from werkzeug.debug import DebuggedApplication
             application = DebuggedApplication(application, True)
 
+        try:
+            from .webdav import dav_app
+        except ImportError as e:
+            logger.error('WebDav interface not enabled: %r', e)
+            dav_app = None
+        if dav_app:
+            from werkzeug.wsgi import DispatcherMiddleware
+            application = DispatcherMiddleware(application, {
+                '/dav': dav_app
+            })
+        
+        container = tornado.wsgi.WSGIContainer(application)
+        http_server = tornado.httpserver.HTTPServer(container)
+        http_server.listen(port, hostname)
+        # todo add more serving processes as per us #107369722
+        """ it was like this
         def inner():
             processes = self.config.get('processes', 4)
             self.server = make_server(hostname, port, application, processes=processes)
             self.server.serve_forever()
-
-        if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
-            display_hostname = hostname != '*' and hostname or 'localhost'
-            if ':' in display_hostname:
-                display_hostname = '[%s]' % display_hostname
-            self.logger.info('webui running on http://%s:%d/', display_hostname, port)
-
+        """
         if use_reloader:
-            run_with_reloader(inner)
-        else:
-            inner()
+            from tornado import autoreload
+            autoreload.start()
+
+        self.logger.info('webui running on %s:%s', hostname, port)
+        tornado.ioloop.IOLoop.current().start()
 
     def quit(self):
-        if hasattr(self, 'server'):
-            self.server.shutdown_signal = True
+        import tornado.ioloop
+
+        tornado.ioloop.IOLoop.current().stop()
         self.logger.info('webui exiting...')
 
 
-app = TornadoFlask('webui',
-                   static_folder=os.path.join(os.path.dirname(__file__), 'static'),
-                   template_folder=os.path.join(os.path.dirname(__file__), 'templates'))
+app = QuitableFlask('webui',
+                    static_folder=os.path.join(os.path.dirname(__file__), 'static'),
+                    template_folder=os.path.join(os.path.dirname(__file__), 'templates'))
 app.secret_key = os.urandom(24)
 app.jinja_env.line_statement_prefix = '#'
 app.jinja_env.globals.update(builtins.__dict__)

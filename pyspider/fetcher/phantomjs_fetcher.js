@@ -34,26 +34,7 @@ if (system.args.length !== 2) {
       response.closeGracefully();
       return;
     }
-
-    var fetch = JSON.parse(request.postRaw);
-    console.debug(JSON.stringify(fetch, null, 2));
-
-    // create and set page
-    var page = webpage.create();
-    page.viewportSize = {
-      width: 1024,
-      height: 768
-    }
-    if (fetch.headers && fetch.headers['User-Agent']) {
-      page.settings.userAgent = fetch.headers['User-Agent'];
-    }
-    page.settings.loadImages = fetch.load_images ? true : false;
-    page.settings.resourceTimeout = fetch.timeout ? fetch.timeout * 1000 : 120*1000;
-    if (fetch.headers) {
-      page.customHeaders = fetch.headers;
-    }
     
-    // add callbacks
     var first_response = null,
         finished = false,
         page_loaded = false,
@@ -61,6 +42,35 @@ if (system.args.length !== 2) {
         end_time = null,
         script_executed = false,
         script_result = null;
+
+    var fetch = JSON.parse(request.postRaw);
+    console.debug(JSON.stringify(fetch, null, 2));
+
+    // create and set page
+    var page = webpage.create();
+    page.onConsoleMessage = function(msg) {
+        console.log('console: ' + msg);
+    };
+    page.viewportSize = {
+      width: fetch.js_viewport_width || 1024,
+      height: fetch.js_viewport_height || 768*3
+    }
+    if (fetch.headers) {
+      fetch.headers['Accept-Encoding'] = undefined;
+      fetch.headers['Connection'] = undefined;
+      fetch.headers['Content-Length'] = undefined;
+    }
+    if (fetch.headers && fetch.headers['User-Agent']) {
+      page.settings.userAgent = fetch.headers['User-Agent'];
+    }
+    // this may cause memory leak: https://github.com/ariya/phantomjs/issues/12903
+    page.settings.loadImages = fetch.load_images === undefined ? true : fetch.load_images;
+    page.settings.resourceTimeout = fetch.timeout ? fetch.timeout * 1000 : 120*1000;
+    if (fetch.headers) {
+      page.customHeaders = fetch.headers;
+    }
+
+    // add callbacks
     page.onInitialized = function() {
       if (!script_executed && fetch.js_script && fetch.js_run_at === "document-start") {
         script_executed = true;
@@ -94,7 +104,7 @@ if (system.args.length !== 2) {
         setTimeout(make_result, wait_before_end+10, page);
       }
     }
-    page.onResourceError=page.onResourceTimeout=function(response) {
+    page.onResourceError = page.onResourceTimeout=function(response) {
       console.info("Request error: #"+response.id+" ["+response.errorCode+"="+response.errorString+"]"+response.url);
       if (first_response === null) {
         first_response = response;
@@ -105,12 +115,11 @@ if (system.args.length !== 2) {
         setTimeout(make_result, wait_before_end+10, page);
       }
     }
+
+    // make sure request will finished
     setTimeout(function(page) {
-      if (first_response) {
-        end_time = Date.now()-1;
-        make_result(page);
-      }
-    }, page.settings.resourceTimeout, page);
+      make_result(page);
+    }, page.settings.resourceTimeout + 100, page);
 
     // send request
     page.open(fetch.url, {
@@ -120,12 +129,17 @@ if (system.args.length !== 2) {
 
     // make response
     function make_result(page) {
-      if (!!!end_time || finished) {
+      if (finished) {
         return;
       }
-      if (end_time > Date.now()) {
-        setTimeout(make_result, Date.now() - end_time, page);
-        return;
+      if (Date.now() - start_time < page.settings.resourceTimeout) {
+        if (!!!end_time) {
+          return;
+        }
+        if (end_time > Date.now()) {
+          setTimeout(make_result, Date.now() - end_time, page);
+          return;
+        }
       }
 
       var result = {};
@@ -145,6 +159,8 @@ if (system.args.length !== 2) {
         }
       }
 
+      page.close();
+      finished = true;
       console.log("["+result.status_code+"] "+result.orig_url+" "+result.time)
 
       var body = JSON.stringify(result, null, 2);
@@ -154,11 +170,13 @@ if (system.args.length !== 2) {
       });
       response.write(body);
       response.closeGracefully();
-      finished = true;
-      page.close();
     }
 
     function _make_result(page) {
+      if (first_response === null) {
+        throw "No response received!";
+      }
+
       var cookies = {};
       page.cookies.forEach(function(e) {
         cookies[e.name] = e.value;

@@ -5,10 +5,7 @@
 #         http://binux.me
 # Created on 2014-10-08 15:04:08
 
-try:
-    from urllib import parse as urlparse
-except ImportError:
-    import urlparse
+from six.moves.urllib.parse import urlparse, parse_qs
 
 
 def connect_database(url):
@@ -31,6 +28,10 @@ def connect_database(url):
         sqlalchemy+postgresql+type://user:passwd@host:port/database
         sqlalchemy+mysql+mysqlconnector+type://user:passwd@host:port/database
         more: http://docs.sqlalchemy.org/en/rel_0_9/core/engines.html
+    redis:
+        redis+taskdb://host:port/db
+    elasticsearch:
+        elasticsearch+type://host:port/?index=pyspider
     local:
         local+projectdb://filepath,filepath
 
@@ -40,7 +41,13 @@ def connect_database(url):
         resultdb
 
     """
-    parsed = urlparse.urlparse(url)
+    db = _connect_database(url)
+    db.copy = lambda: _connect_database(url)
+    return db
+
+
+def _connect_database(url):  # NOQA
+    parsed = urlparse(url)
 
     scheme = parsed.scheme.split('+')
     if len(scheme) == 1:
@@ -131,6 +138,13 @@ def connect_database(url):
             return ResultDB(url)
         else:
             raise LookupError
+    elif engine == 'redis':
+        if dbtype == 'taskdb':
+            from .redis.taskdb import TaskDB
+            return TaskDB(parsed.hostname, parsed.port,
+                          int(parsed.path.strip('/') or 0))
+        else:
+            raise LookupError('not supported dbtype: %s', dbtype)
     elif engine == 'local':
         scripts = url.split('//', 1)[1].split(',')
         if dbtype == 'projectdb':
@@ -138,5 +152,21 @@ def connect_database(url):
             return ProjectDB(scripts)
         else:
             raise LookupError('not supported dbtype: %s', dbtype)
+    elif engine == 'elasticsearch' or engine == 'es':
+        index = parse_qs(parsed.query)
+        if 'index' in index and index['index']:
+            index = index['index'][0]
+        else:
+            index = 'pyspider'
+
+        if dbtype == 'projectdb':
+            from .elasticsearch.projectdb import ProjectDB
+            return ProjectDB([parsed.netloc], index=index)
+        elif dbtype == 'resultdb':
+            from .elasticsearch.resultdb import ResultDB
+            return ResultDB([parsed.netloc], index=index)
+        elif dbtype == 'taskdb':
+            from .elasticsearch.taskdb import TaskDB
+            return TaskDB([parsed.netloc], index=index)
     else:
         raise Exception('unknown engine: %s' % engine)

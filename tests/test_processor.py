@@ -6,12 +6,14 @@
 # Created on 2014-02-22 14:00:05
 
 import os
+import six
 import copy
 import time
 import unittest2 as unittest
 import logging.config
 logging.config.fileConfig("pyspider/logging.conf")
 
+from pyspider.libs import utils
 from pyspider.processor.project_module import ProjectManager
 
 
@@ -163,7 +165,7 @@ class TestProjectModule(unittest.TestCase):
             'project': self.project,
             'url': 'data:,_on_get_info',
             'fetch': {
-                'save': ['min_tick', ],
+                'save': ['min_tick', 'retry_delay'],
             },
             'process': {
                 'callback': '_on_get_info',
@@ -173,10 +175,11 @@ class TestProjectModule(unittest.TestCase):
         fetch_result['save'] = task['fetch']['save']
 
         ret = self.instance.run_task(self.module, task, fetch_result)
-        self.assertEqual(len(ret.follows), 1, ret.logstr())
+        self.assertEqual(len(ret.save), 2, ret.logstr())
         for each in ret.follows:
             self.assertEqual(each['url'], 'data:,on_get_info')
             self.assertEqual(each['fetch']['save']['min_tick'], 10)
+            self.assertEqual(each['fetch']['save']['retry_delay'], {})
 
     def test_30_generator(self):
         self.base_task['process']['callback'] = 'generator'
@@ -186,9 +189,9 @@ class TestProjectModule(unittest.TestCase):
 
 import shutil
 import inspect
-from multiprocessing import Queue
 from pyspider.database.sqlite import projectdb
 from pyspider.processor.processor import Processor
+from pyspider.libs.multiprocessing_queue import Queue
 from pyspider.libs.utils import run_in_thread
 from pyspider.libs import sample_handler
 
@@ -400,7 +403,7 @@ class TestProcessor(unittest.TestCase):
             },
             "project": "test_broken_project",
             "taskid": "data:,on_start",
-            "url": "data:,on_start"
+            "url": "data:,on_start",
         }
         fetch_result = {
             "orig_url": "data:,on_start",
@@ -420,3 +423,102 @@ class TestProcessor(unittest.TestCase):
         self.assertGreater(len(status['track']['process']['logs']), 0)
         self.assertIsNotNone(status['track']['process']['exception'])
         self.assertTrue(self.newtask_queue.empty())
+
+    def test_70_update_project(self):
+        self.processor.project_manager.CHECK_PROJECTS_INTERVAL = 1000000
+        self.processor.project_manager._check_projects()
+        self.assertIsNotNone(self.processor.project_manager.get('test_broken_project'))
+        # clear new task queue
+        while not self.newtask_queue.empty():
+            self.newtask_queue.get()
+        # clear status queue
+        while not self.status_queue.empty():
+            self.status_queue.get()
+
+        task = {
+            "process": {
+                "callback": "on_start"
+            },
+            "project": "test_broken_project",
+            "taskid": "data:,on_start",
+            "url": "data:,on_start"
+        }
+        fetch_result = {
+            "orig_url": "data:,on_start",
+            "content": "on_start",
+            "headers": {},
+            "status_code": 200,
+            "url": "data:,on_start",
+            "time": 0,
+        }
+
+        self.projectdb.update('test_broken_project', {
+            'script': inspect.getsource(sample_handler),
+        })
+
+        # not update
+        self.in_queue.put((task, fetch_result))
+        time.sleep(1)
+        self.assertFalse(self.status_queue.empty())
+        while not self.status_queue.empty():
+            status = self.status_queue.get()
+        self.assertEqual(status['track']['fetch']['ok'], True)
+        self.assertEqual(status['track']['process']['ok'], False)
+
+        # updated
+        task['project_updatetime'] = time.time()
+        self.in_queue.put((task, fetch_result))
+        time.sleep(1)
+        self.assertFalse(self.status_queue.empty())
+        while not self.status_queue.empty():
+            status = self.status_queue.get()
+        self.assertEqual(status['track']['fetch']['ok'], True)
+        self.assertEqual(status['track']['process']['ok'], True)
+
+        self.projectdb.update('test_broken_project', {
+            'script': inspect.getsource(sample_handler)[:10],
+        })
+
+        # update with md5
+        task['project_md5sum'] = 'testmd5'
+        del task['project_updatetime']
+        self.in_queue.put((task, fetch_result))
+        time.sleep(1)
+        self.assertFalse(self.status_queue.empty())
+        while not self.status_queue.empty():
+            status = self.status_queue.get()
+        self.assertEqual(status['track']['fetch']['ok'], True)
+        self.assertEqual(status['track']['process']['ok'], False)
+
+        self.processor.project_manager.CHECK_PROJECTS_INTERVAL = 0.1
+
+    @unittest.skipIf(six.PY3, "deprecated feature, not work for PY3")
+    def test_80_import_project(self):
+        self.projectdb.insert('test_project2', {
+            'name': 'test_project',
+            'group': 'group',
+            'status': 'TODO',
+            'script': inspect.getsource(sample_handler),
+            'comments': 'test project',
+            'rate': 1.0,
+            'burst': 10,
+        })
+        self.projectdb.insert('test_project3', {
+            'name': 'test_project',
+            'group': 'group',
+            'status': 'TODO',
+            'script': inspect.getsource(sample_handler),
+            'comments': 'test project',
+            'rate': 1.0,
+            'burst': 10,
+        })
+
+        from projects import test_project
+        self.assertIsNotNone(test_project)
+        self.assertIsNotNone(test_project.Handler)
+
+        from projects.test_project2 import Handler
+        self.assertIsNotNone(Handler)
+
+        import projects.test_project3
+        self.assertIsNotNone(projects.test_project3.Handler)

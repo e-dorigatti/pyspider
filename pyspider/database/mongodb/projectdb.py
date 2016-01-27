@@ -16,10 +16,23 @@ class ProjectDB(BaseProjectDB):
 
     def __init__(self, url, database='projectdb'):
         self.conn = MongoClient(url)
+        self.conn.admin.command("ismaster")
         self.database = self.conn[database]
         self.collection = self.database[self.__collection_name__]
 
         self.collection.ensure_index('name', unique=True)
+
+    def _default_fields(self, each):
+        if each is None:
+            return each
+        each.setdefault('group', None)
+        each.setdefault('status', 'TODO')
+        each.setdefault('script', '')
+        each.setdefault('comments', None)
+        each.setdefault('rate', 0)
+        each.setdefault('burst', 0)
+        each.setdefault('updatetime', 0)
+        return each
 
     def insert(self, name, obj={}):
         obj = dict(obj)
@@ -34,24 +47,22 @@ class ProjectDB(BaseProjectDB):
         return self.collection.update({'name': name}, {'$set': obj})
 
     def get_all(self, fields=None):
-        for each in self.collection.find({}, fields=fields):
+        for each in self.collection.find({}, fields):
             if each and '_id' in each:
                 del each['_id']
-            yield each
+            yield self._default_fields(each)
 
     def get(self, name, fields=None):
-        each = self.collection.find_one({'name': name}, fields=fields)
+        each = self.collection.find_one({'name': name}, fields)
         if each and '_id' in each:
             del each['_id']
-        return each
+        return self._default_fields(each)
 
     def check_update(self, timestamp, fields=None):
-        result = []
         for project in self.get_all(fields=('updatetime', 'name')):
             if project['updatetime'] > timestamp:
                 project = self.get(project['name'], fields)
-                result.append(project)
-        return result
+                yield self._default_fields(project)
 
     def drop(self, name):
         return self.collection.remove({'name': name})

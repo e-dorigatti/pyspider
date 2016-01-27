@@ -17,20 +17,21 @@ from pyspider.libs import utils
 from pyspider.libs.log import LogFormatter
 from pyspider.libs.utils import pretty_unicode, hide_me
 from pyspider.libs.response import rebuild_response
-from .project_module import ProjectManager, ProjectLoader, ProjectFinder
+from .project_module import ProjectManager, ProjectFinder
 
 
 class ProcessorResult(object):
     """The result and logs producted by a callback"""
 
     def __init__(self, result=None, follows=(), messages=(),
-                 logs=(), exception=None, extinfo={}):
+                 logs=(), exception=None, extinfo={}, save=None):
         self.result = result
         self.follows = follows
         self.messages = messages
         self.logs = logs
         self.exception = exception
         self.extinfo = extinfo
+        self.save = save
 
     def rethrow(self):
         """rethrow the exception"""
@@ -89,15 +90,8 @@ class Processor(object):
 
         `from project import project_name`
         '''
-        _self = self
-
-        class ProcessProjectFinder(ProjectFinder):
-
-            def get_loader(self, name):
-                info = _self.projectdb.get(name)
-                if info:
-                    return ProjectLoader(info)
-        sys.meta_path.append(ProcessProjectFinder())
+        if six.PY2:
+            sys.meta_path.append(ProjectFinder(self.projectdb))
 
     def __del__(self):
         pass
@@ -110,8 +104,9 @@ class Processor(object):
         try:
             assert 'taskid' in task, 'need taskid in task'
             project = task['project']
-            updatetime = task.get('updatetime', None)
-            project_data = self.project_manager.get(project, updatetime)
+            updatetime = task.get('project_updatetime', None)
+            md5sum = task.get('project_md5sum', None)
+            project_data = self.project_manager.get(project, updatetime, md5sum)
             assert project_data, "no such project!"
             if project_data.get('exception'):
                 ret = ProcessorResult(logs=(project_data.get('exception_log'), ),
@@ -160,8 +155,11 @@ class Processor(object):
                         'logs': ret.logstr()[-self.RESULT_LOGS_LIMIT:],
                         'exception': ret.exception,
                     },
+                    'save': ret.save,
                 },
             }
+            if 'schedule' in task:
+                status_pack['schedule'] = task['schedule']
 
             # FIXME: unicode_obj should used in scheduler before store to database
             # it's used here for performance.
@@ -170,21 +168,26 @@ class Processor(object):
         # FIXME: unicode_obj should used in scheduler before store to database
         # it's used here for performance.
         if ret.follows:
-            self.newtask_queue.put([utils.unicode_obj(newtask) for newtask in ret.follows])
+            for each in (ret.follows[x:x + 1000] for x in range(0, len(ret.follows), 1000)):
+                self.newtask_queue.put([utils.unicode_obj(newtask) for newtask in each])
 
         for project, msg, url in ret.messages:
-            self.inqueue.put(({
-                'taskid': utils.md5string(url),
-                'project': project,
-                'url': url,
-                'process': {
-                    'callback': '_on_message',
-                }
-            }, {
-                'status_code': 200,
-                'url': url,
-                'save': (task['project'], msg),
-            }))
+            try:
+                self.on_task({
+                    'taskid': utils.md5string(url),
+                    'project': project,
+                    'url': url,
+                    'process': {
+                        'callback': '_on_message',
+                    }
+                }, {
+                    'status_code': 200,
+                    'url': url,
+                    'save': (task['project'], msg),
+                })
+            except Exception as e:
+                logger.exception('Sending message error.')
+                continue
 
         if ret.exception:
             logger_func = logger.error

@@ -7,18 +7,24 @@ python:
 services:
     - mongodb
     - rabbitmq
-#addons:
-    #postgresql: "9.4"
+    - redis-server
+    - elasticsearch
+addons:
+    postgresql: "9.4"
 before_install:
     - sudo apt-get update -qq
     - sudo apt-get install -y beanstalkd
     - echo "START=yes" | sudo tee -a /etc/default/beanstalkd > /dev/null
     - sudo service beanstalkd start
+before_script:
+    - psql -c "CREATE DATABASE pyspider_test_taskdb ENCODING 'UTF8' TEMPLATE=template0;" -U postgres
+    - psql -c "CREATE DATABASE pyspider_test_projectdb ENCODING 'UTF8' TEMPLATE=template0;" -U postgres
+    - psql -c "CREATE DATABASE pyspider_test_resultdb ENCODING 'UTF8' TEMPLATE=template0;" -U postgres
+    - sleep 10
 install:
-    - pip install --allow-all-external -r requirements.txt
-    - pip install coveralls httpbin pyproxy>=0.1.6
-    - if [[ $TRAVIS_PYTHON_VERSION == 2* ]]; then travis_retry pip install beanstalkc; fi
-    - pip install -e .
+    - pip install http://cdn.mysql.com/Downloads/Connector-Python/mysql-connector-python-2.0.4.zip#md5=3df394d89300db95163f17c843ef49df
+    - pip install --allow-all-external -e .[all,test]
+    - pip install coveralls
 script:
     - coverage run setup.py test
 after_success:

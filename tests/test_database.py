@@ -69,10 +69,6 @@ class TaskDBCase(object):
     def setUpClass(self):
         raise NotImplementedError
 
-    @classmethod
-    def tearDownClass(self):
-        raise NotImplementedError
-
     # this test not works for mongodb
     # def test_10_create_project(self):
         # with self.assertRaises(AssertionError):
@@ -124,7 +120,8 @@ class TaskDBCase(object):
         tasks = list(self.taskdb.load_tasks(self.taskdb.ACTIVE))
         self.assertEqual(len(tasks), 1)
         task = tasks[0]
-        self.assertEqual(task['taskid'], 'taskid')
+        self.assertIn('taskid', task, task)
+        self.assertEqual(task['taskid'], 'taskid', task)
         self.assertEqual(task['schedule'], self.sample_task['schedule'])
         self.assertEqual(task['fetch'], self.sample_task['fetch'])
         self.assertEqual(task['process'], self.sample_task['process'])
@@ -149,8 +146,7 @@ class TaskDBCase(object):
         self.assertIsNone(self.taskdb.get_task('drop_project3', 'taskid'), None)
 
     def test_z20_update_projects(self):
-        self.taskdb.projects = set()
-        saved = self.taskdb.UPDATE_PROJECTS_TIME
+        saved = getattr(self.taskdb, 'UPDATE_PROJECTS_TIME', None)
         self.taskdb.UPDATE_PROJECTS_TIME = 0.1
         time.sleep(0.2)
         self.assertIn('drop_project2', self.taskdb.projects)
@@ -161,22 +157,15 @@ class TaskDBCase(object):
 class ProjectDBCase(object):
     sample_project = {
         'name': 'name',
-        'group': 'group',
+        'script': 'import time\nprint(time.time(), "!@#$%^&*()\';:<>?/|")',
         'status': 'TODO',
-        'script': 'import time\nprint(time.time())',
-        'comments': 'test project',
         'rate': 1.0,
         'burst': 10.0,
-        'updatetime': time.time(),
     }
 
     @classmethod
     def setUpClass(self):
-        raise NotImplemented()
-
-    @classmethod
-    def tearDownClass(self):
-        raise NotImplemented()
+        raise NotImplemented
 
     def test_10_insert(self):
         self.projectdb.insert('abc', self.sample_project)
@@ -187,16 +176,20 @@ class ProjectDBCase(object):
     def test_20_get_all(self):
         projects = list(self.projectdb.get_all())
         self.assertEqual(len(projects), 2)
-        project = projects[0]
+        for project in projects:
+            if project['name'] == 'abc':
+                break
+        for key in ('name', 'group', 'status', 'script', 'comments', 'rate', 'burst', 'updatetime'):
+            self.assertIn(key, project)
+
         self.assertEqual(project['name'], u'abc')
-        self.assertEqual(project['group'], self.sample_project['group'])
         self.assertEqual(project['status'], self.sample_project['status'])
         self.assertEqual(project['script'], self.sample_project['script'])
-        self.assertEqual(project['comments'], self.sample_project['comments'])
         self.assertEqual(project['rate'], self.sample_project['rate'])
         self.assertEqual(type(project['rate']), float)
         self.assertEqual(project['burst'], self.sample_project['burst'])
         self.assertEqual(type(project['burst']), float)
+
 
         projects = list(self.projectdb.get_all(fields=['name', 'script']))
         self.assertEqual(len(projects), 2)
@@ -224,6 +217,12 @@ class ProjectDBCase(object):
         self.assertEqual(project['name'], 'abc')
         self.assertEqual(project['status'], 'RUNNING')
 
+    def test_45_check_update_when_bootup(self):
+        projects = list(self.projectdb.check_update(0))
+        project = projects[0]
+        for key in ('name', 'group', 'status', 'script', 'comments', 'rate', 'burst', 'updatetime'):
+            self.assertIn(key, project)
+
     def test_50_get(self):
         project = self.projectdb.get('not_found')
         self.assertIsNone(project)
@@ -249,11 +248,7 @@ class ResultDBCase(object):
 
     @classmethod
     def setUpClass(self):
-        raise NotImplemented()
-
-    @classmethod
-    def tearDownClass(self):
-        raise NotImplemented()
+        raise NotImplemented
 
     def test_10_save(self):
         self.resultdb.save('test_project', 'test_taskid', 'test_url', 'result')
@@ -317,7 +312,6 @@ class ResultDBCase(object):
         self.assertIsNone(self.resultdb.get('drop_project3', 'test_taskid'))
 
     def test_z20_update_projects(self):
-        self.resultdb.projects = set()
         saved = self.resultdb.UPDATE_PROJECTS_TIME
         self.resultdb.UPDATE_PROJECTS_TIME = 0.1
         time.sleep(0.2)
@@ -441,6 +435,48 @@ class TestMongoDBResultDB(ResultDBCase, unittest.TestCase):
         self.resultdb.conn.drop_database(self.resultdb.database.name)
 
 
+@unittest.skipIf(os.environ.get('IGNORE_MYSQL'), 'no mysql server for test.')
+class TestSQLAlchemyMySQLTaskDB(TaskDBCase, unittest.TestCase):
+
+    @classmethod
+    def setUpClass(self):
+        self.taskdb = database.connect_database(
+            'sqlalchemy+mysql+mysqlconnector+taskdb://root@localhost/pyspider_test_taskdb'
+        )
+
+    @classmethod
+    def tearDownClass(self):
+        self.taskdb.engine.execute('DROP DATABASE pyspider_test_taskdb')
+
+
+@unittest.skipIf(os.environ.get('IGNORE_MYSQL'), 'no mysql server for test.')
+class TestSQLAlchemyMySQLProjectDB(ProjectDBCase, unittest.TestCase):
+
+    @classmethod
+    def setUpClass(self):
+        self.projectdb = database.connect_database(
+            'sqlalchemy+mysql+mysqlconnector+projectdb://root@localhost/pyspider_test_projectdb'
+        )
+
+    @classmethod
+    def tearDownClass(self):
+        self.projectdb.engine.execute('DROP DATABASE pyspider_test_projectdb')
+
+
+@unittest.skipIf(os.environ.get('IGNORE_MYSQL'), 'no mysql server for test.')
+class TestSQLAlchemyMySQLResultDB(ResultDBCase, unittest.TestCase):
+
+    @classmethod
+    def setUpClass(self):
+        self.resultdb = database.connect_database(
+            'sqlalchemy+mysql+mysqlconnector+resultdb://root@localhost/pyspider_test_resultdb'
+        )
+
+    @classmethod
+    def tearDownClass(self):
+        self.resultdb.engine.execute('DROP DATABASE pyspider_test_resultdb')
+
+
 class TestSQLAlchemyTaskDB(TaskDBCase, unittest.TestCase):
 
     @classmethod
@@ -455,7 +491,6 @@ class TestSQLAlchemyTaskDB(TaskDBCase, unittest.TestCase):
 
 
 class TestSQLAlchemyProjectDB(ProjectDBCase, unittest.TestCase):
-
 
     @classmethod
     def setUpClass(self):
@@ -481,48 +516,131 @@ class TestSQLAlchemyResultDB(ResultDBCase, unittest.TestCase):
         del self.resultdb
 
 
-#@unittest.skipIf(os.environ.get('IGNORE_POSTGRESQL'), 'no postgresql server for test.')
-#class TestPGTaskDB(TaskDBCase, unittest.TestCase):
+@unittest.skipIf(os.environ.get('IGNORE_POSTGRESQL'), 'no postgresql server for test.')
+class TestPGTaskDB(TaskDBCase, unittest.TestCase):
 
-    #@classmethod
-    #def setUpClass(self):
-        #self.taskdb = database.connect_database(
-            #'sqlalchemy+postgresql+taskdb://postgres@127.0.0.1:5432/pyspider_test_taskdb'
-        #)
+    @classmethod
+    def setUpClass(self):
+        self.taskdb = database.connect_database(
+            'sqlalchemy+postgresql+taskdb://postgres@127.0.0.1:5432/pyspider_test_taskdb'
+        )
+        self.tearDownClass()
 
-    #@classmethod
-    #def tearDownClass(self):
-        #self.taskdb._execute('DROP DATABASE pyspider_test_taskdb')
-
-
-#@unittest.skipIf(os.environ.get('IGNORE_POSTGRESQL'), 'no postgresql server for test.')
-#class TestPGProjectDB(ProjectDBCase, unittest.TestCase):
+    @classmethod
+    def tearDownClass(self):
+        for project in self.taskdb.projects:
+            self.taskdb.drop(project)
 
 
-    #@classmethod
-    #def setUpClass(self):
-        #self.projectdb = database.connect_database(
-            #'sqlalchemy+postgresql+taskdb://postgres@127.0.0.1:5432/pyspider_test_projectdb'
-        #)
+@unittest.skipIf(os.environ.get('IGNORE_POSTGRESQL'), 'no postgresql server for test.')
+class TestPGProjectDB(ProjectDBCase, unittest.TestCase):
 
-    #@classmethod
-    #def tearDownClass(self):
-        #self.projectdb._execute('DROP DATABASE pyspider_test_projectdb')
+    @classmethod
+    def setUpClass(self):
+        self.projectdb = database.connect_database(
+            'sqlalchemy+postgresql+projectdb://postgres@127.0.0.1:5432/pyspider_test_projectdb'
+        )
+        self.tearDownClass()
+
+    @classmethod
+    def tearDownClass(self):
+        for project in self.projectdb.get_all(fields=['name']):
+            self.projectdb.drop(project['name'])
 
 
-#@unittest.skipIf(os.environ.get('IGNORE_POSTGRESQL'), 'no postgresql server for test.')
-#class TestPGResultDB(ResultDBCase, unittest.TestCase):
+@unittest.skipIf(os.environ.get('IGNORE_POSTGRESQL'), 'no postgresql server for test.')
+class TestPGResultDB(ResultDBCase, unittest.TestCase):
 
-    #@classmethod
-    #def setUpClass(self):
-        #self.resultdb = database.connect_database(
-            #'sqlalchemy+postgresql+taskdb://postgres@127.0.0.1:5432/pyspider_test_resultdb'
-        #)
+    @classmethod
+    def setUpClass(self):
+        self.resultdb = database.connect_database(
+            'sqlalchemy+postgresql+resultdb://postgres@127.0.0.1/pyspider_test_resultdb'
+        )
+        self.tearDownClass()
 
-    #@classmethod
-    #def tearDownClass(self):
-        #self.resultdb._execute('DROP DATABASE pyspider_test_resultdb')
+    @classmethod
+    def tearDownClass(self):
+        for project in self.resultdb.projects:
+            self.resultdb.drop(project)
 
+
+@unittest.skipIf(os.environ.get('IGNORE_REDIS'), 'no redis server for test.')
+class TestRedisTaskDB(TaskDBCase, unittest.TestCase):
+
+    @classmethod
+    def setUpClass(self):
+        self.taskdb = database.connect_database('redis+taskdb://localhost:6379/15')
+        self.taskdb.__prefix__ = 'testtaskdb_'
+
+    @classmethod
+    def tearDownClass(self):
+        for project in self.taskdb.projects:
+            self.taskdb.drop(project)
+
+
+@unittest.skipIf(os.environ.get('IGNORE_ELASTICSEARCH'), 'no elasticsearch server for test.')
+class TestESProjectDB(ProjectDBCase, unittest.TestCase):
+
+    @classmethod
+    def setUpClass(self):
+        self.projectdb = database.connect_database(
+            'elasticsearch+projectdb://127.0.0.1:9200/?index=test_pyspider'
+        )
+
+    @classmethod
+    def tearDownClass(self):
+        self.projectdb.es.indices.delete(index='test_pyspider', ignore=[400, 404])
+
+
+@unittest.skipIf(os.environ.get('IGNORE_ELASTICSEARCH'), 'no elasticsearch server for test.')
+class TestESResultDB(ResultDBCase, unittest.TestCase):
+
+    @classmethod
+    def setUpClass(self):
+        self.resultdb = database.connect_database(
+            'elasticsearch+resultdb://127.0.0.1:9200/?index=test_pyspider'
+        )
+
+    @classmethod
+    def tearDownClass(self):
+        self.resultdb.es.indices.delete(index='test_pyspider', ignore=[400, 404])
+
+    def test_15_save(self):
+        self.resultdb.refresh()
+
+    def test_30_select(self):
+        for i in range(5):
+            self.resultdb.save('test_project', 'test_taskid-%d' % i,
+                               'test_url', 'result-%d' % i)
+        self.resultdb.refresh()
+
+        ret = list(self.resultdb.select('test_project'))
+        self.assertEqual(len(ret), 6)
+
+        ret = list(self.resultdb.select('test_project', limit=4))
+        self.assertEqual(len(ret), 4)
+
+        for ret in self.resultdb.select('test_project', fields=('url', ), limit=1):
+            self.assertIn('url', ret)
+            self.assertNotIn('result', ret)
+
+    def test_z20_update_projects(self):
+        self.resultdb.refresh()
+        self.assertIn('drop_project2', self.resultdb.projects)
+        self.assertNotIn('drop_project3', self.resultdb.projects)
+
+@unittest.skipIf(os.environ.get('IGNORE_ELASTICSEARCH'), 'no elasticsearch server for test.')
+class TestESTaskDB(TaskDBCase, unittest.TestCase):
+
+    @classmethod
+    def setUpClass(self):
+        self.taskdb = database.connect_database(
+            'elasticsearch+taskdb://127.0.0.1:9200/?index=test_pyspider'
+        )
+
+    @classmethod
+    def tearDownClass(self):
+        self.taskdb.es.indices.delete(index='test_pyspider', ignore=[400, 404])
 
 if __name__ == '__main__':
     unittest.main()
