@@ -1,34 +1,39 @@
-from fabric.api import *
-import datetime
+from fabric.api import run, put
+from fabric.context_managers import shell_env
+from StringIO import StringIO
+import random
 
 
-def backup(dest, mysql_user, backup_name=None, databases=None, mysqldump_other_args=''):
-    name = backup_name or datetime.date.today().isoformat().replace('-', '')
-    dest = dest.format(name=name)
-    databases = '-B' + ' '.join(databases.split(';')) if databases else '-A'
-
-    dump_cmd = 'mysqldump -u {user} -p {databases} {other}'
-    save_cmd = 'aws s3 cp - {dest}' if dest.startswith('s3://') else 'cat - > {dest}'
-
-    run('{dump} | {save}'.format(dump=dump_cmd, save=save_cmd).format(
-        user=mysql_user, databases=databases, dest=dest, other=mysqldump_other_args)
+def run_detached(command):
+    tempfile = '/tmp/{}.sh'.format(
+        ''.join(random.choice('0123456789abcdef') for _ in xrange(12))
     )
+    put(StringIO(command), tempfile)
+    run('cat ' + tempfile)
+    run('screen -L -d -m bash {}; sleep 0'.format(tempfile))
+    run('rm ' + tempfile)
 
 
-def optimize(mysql_user, database, tables=None):
-    def mysqlrun(query):
-        query = query.format(user=mysql_user, database=database)
-        return run('mysql -u {user} -p {database} -e "{query}"'.format(
-            user=mysql_user, database=database, query=query.replace('\n', '\\n')
-        ))
+def backup(pguser, pgpassword, pghost='localhost', pgport='5432', compress=True,
+           out_file='/tmp/out.postgre.sql.gz', pgdump_additional_parameters='-c',
+           detach=True):
 
-    if tables:
-        tables = tables.split(';')
+    compress = compress in {True, 'Y', 'y', 'yes', 'true'}
+    detach = detach in {True, 'Y', 'y', 'yes', 'true'}
+
+    epilogue = pgdump_additional_parameters
+    if compress:
+        epilogue += ' | gzip '
+
+    if out_file.startswith('s3://'):
+        epilogue += '| aws s3 cp - ' + out_file
     else:
-        out = mysqlrun('''SELECT table_name
-                          FROM information_schema.tables
-                          WHERE table_schema='{database}' ''')
-        tables = [row[1:-2].strip() for row in out.split('\n') if row.startswith('| ')][1:]
+        epilogue += ' > ' + out_file
 
-    mysqlrun('OPTIMIZE TABLE ' + ', '.join(tables))
-
+    with shell_env(PGUSER=pguser, PGPASSWORD=pgpassword,
+                   PGHOST=pghost, PGPORT=pgport):
+        command = 'pg_dumpall ' + epilogue
+        if detach:
+            run_detached(command)
+        else:
+            run(command)
