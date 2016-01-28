@@ -414,7 +414,6 @@ class BaseHandler(object):
             function = cronjob.__get__(self, self.__class__)
             self._run_func(function, response, task)
 
-    @not_send_status
     def _on_get_info(self, response, task):
         """Sending runtime infomation about this script."""
         for each in response.save or []:
@@ -424,7 +423,7 @@ class BaseHandler(object):
                 if not isinstance(self.retry_delay, dict):
                     self.retry_delay = {'': self.retry_delay}
                 self.save[each] = self.retry_delay
-                self.save[each] = self._min_tick
-        self.save['crawl_frequency'] = self.crawl_frequency
-        self.save['scraper_schedule'] = self.scraper_schedule
-        #self.crawl('data:,on_get_info', save=result)
+            elif each == 'crawl_frequency':
+                self.save[each] = self.crawl_frequency
+            elif each == 'scraper_schedule':
+                self.save[each] = self.scraper_schedule
