@@ -32,7 +32,7 @@ class TaskDB(SplitTableMixin, BaseTaskDB):
                            Column('fetch', LargeBinary),
                            Column('process', LargeBinary),
                            Column('track', LargeBinary),
-                           Column('lastcrawltime', Float(32)),
+                           Column('lastcrawltime', Float(32), index=True, unique=False),
                            Column('updatetime', Float(32)),
                            mysql_engine='InnoDB',
                            mysql_charset='utf8'

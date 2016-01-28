@@ -16,7 +16,7 @@ def run_detached(command):
 
 def backup(pguser, pgpassword, pghost='localhost', pgport='5432', compress=True,
            out_file='/tmp/out.postgre.sql.gz', pgdump_additional_parameters='-c',
-           detach=True):
+           detach=False):
 
     compress = compress in {True, 'Y', 'y', 'yes', 'true'}
     detach = detach in {True, 'Y', 'y', 'yes', 'true'}

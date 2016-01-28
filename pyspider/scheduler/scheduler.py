@@ -309,7 +309,6 @@ class Scheduler(object):
                     'process': {
                         'callback': '_on_cronjob',
                     },
-                    'project_updatetime': self.projects[project['name']].get('updatetime', 0),
                 })
 
             last_start = self.taskdb.get_task(project['name'], 'on_start')
