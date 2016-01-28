@@ -66,17 +66,17 @@ class QuitableFlask(Flask):
             application = DispatcherMiddleware(application, {
                 '/dav': dav_app
             })
-        
+
+        from .result import ResultDumper
         container = tornado.wsgi.WSGIContainer(application)
-        http_server = tornado.httpserver.HTTPServer(container)
+        tornado_app = tornado.web.Application([
+            (r'/results/dump/(\w+)\.(\w+)', ResultDumper),
+            (r'.*', tornado.web.FallbackHandler, dict(fallback=container)),
+        ])
+
+        http_server = tornado.httpserver.HTTPServer(tornado_app)
         http_server.listen(port, hostname)
-        # todo add more serving processes as per us #107369722
-        """ it was like this
-        def inner():
-            processes = self.config.get('processes', 4)
-            self.server = make_server(hostname, port, application, processes=processes)
-            self.server.serve_forever()
-        """
+
         if use_reloader:
             from tornado import autoreload
             autoreload.start()

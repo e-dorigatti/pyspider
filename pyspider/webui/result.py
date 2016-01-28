@@ -8,9 +8,10 @@
 from __future__ import unicode_literals
 
 from flask import render_template, request, json
-from flask import Response
 from .app import app
 from pyspider.libs import result_dump
+import tornado.web
+import tornado.ioloop
 
 
 @app.route('/results')
@@ -30,25 +31,40 @@ def result():
     )
 
 
-@app.route('/results/dump/<project>.<_format>')
-def dump_result(project, _format):
-    resultdb = app.config['resultdb']
-    # force update project list
-    resultdb.get(project, 'any')
-    if project not in resultdb.projects:
-        return "no such project.", 404
+class ResultDumper(tornado.web.RequestHandler):
+    @tornado.web.asynchronous
+    def get(self, project, _format):
+        resultdb = app.config['resultdb']
 
-    offset = int(request.args.get('offset', 0)) or None
-    limit = int(request.args.get('limit', 0)) or None
-    results = resultdb.select(project, offset=offset, limit=limit)
+        # force update project list
+        resultdb.get(project, 'any')
+        if project not in resultdb.projects:
+            return "no such project.", 404
 
-    if _format == 'json':
-        valid = request.args.get('style', 'rows') == 'full'
-        return Response(result_dump.dump_as_json(results, valid),
-                        mimetype='application/json')
-    elif _format == 'txt':
-        return Response(result_dump.dump_as_txt(results),
-                        mimetype='text/plain')
-    elif _format == 'csv':
-        return Response(result_dump.dump_as_csv(results),
-                        mimetype='text/csv')
+        offset = int(self.get_argument('offset', 0)) or None
+        limit = int(self.get_argument('limit', 0)) or None
+        results = resultdb.select(project, offset=offset, limit=limit)
+
+        if _format == 'json':
+            valid = self.get_argument('style', 'rows') == 'full'
+            self.generator = result_dump.dump_as_json(results, valid)
+            mimetype='application/json'
+        elif _format == 'txt':
+            self.generator = result_dump.dump_as_txt(results)
+            mimetype='text/plain'
+        elif _format == 'csv':
+            self.generator = result_dump.dump_as_csv(results)
+            mimetype='text/csv'
+        else:
+            raise tornado.web.HTTPError(404, 'Format not available, choose from json, csv, txt')
+
+        self.set_header('Content-Type', mimetype)
+        tornado.ioloop.IOLoop.current().add_callback(self.write_data)
+
+    def write_data(self):
+        try:
+            data = self.generator.next()
+            self.write(data)
+            tornado.ioloop.IOLoop.current().add_callback(self.write_data)
+        except StopIteration:
+            self.finish()
