@@ -1,4 +1,4 @@
-from fabric.api import run, put
+from fabric.api import run, put, cd, sudo
 from fabric.context_managers import shell_env
 from StringIO import StringIO
 import random
@@ -37,3 +37,12 @@ def backup(pguser, pgpassword, pghost='localhost', pgport='5432', compress=True,
             run_detached(command)
         else:
             run(command)
+
+
+def deploy(pyspider_base_dir, docker_base_dir):
+    with cd(pyspider_base_dir):
+        sudo('git pull')
+        sudo('docker build -t user/pyspider .')
+
+    with cd(docker_base_dir):
+        sudo('docker-compose up -d')
