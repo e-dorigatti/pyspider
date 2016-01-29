@@ -39,7 +39,7 @@ class ResultDumper(tornado.web.RequestHandler):
         # force update project list
         resultdb.get(project, 'any')
         if project not in resultdb.projects:
-            return "no such project.", 404
+            raise tornado.web.HTTPError(404, 'No such project')
 
         offset = int(self.get_argument('offset', 0)) or None
         limit = int(self.get_argument('limit', 0)) or None
@@ -65,6 +65,7 @@ class ResultDumper(tornado.web.RequestHandler):
         try:
             data = self.generator.next()
             self.write(data)
-            tornado.ioloop.IOLoop.current().add_callback(self.write_data)
+            self.flush(callback=self.write_data)
         except StopIteration:
+            self.flush()
             self.finish()
