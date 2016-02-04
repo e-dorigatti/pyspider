@@ -324,8 +324,8 @@ class Scheduler(object):
                 schedule.update(scraper_schedule)
 
                 last_start = last_start or dict(lastcrawltime=0, updatetime=0)
-                since_last_start = now - last_start['lastcrawltime'] or 0
-                since_last_update = now - last_start['updatetime'] or 0
+                since_last_start = now - (last_start['lastcrawltime'] or 0)
+                since_last_update = now - (last_start['updatetime'] or 0)
 
                 if (all(value in schedule[key] for key, value in now_dict.iteritems())
                         and since_last_update > 5 and since_last_start > 60):
