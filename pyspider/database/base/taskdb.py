@@ -76,6 +76,14 @@ class TaskDB(object):
         '''
         raise NotImplementedError
 
+    def count_after(self, project, lastcrawltime):
+        """ count how many tasks were executed after the given datetime
+        :param project: project name
+        :param tastcrawltime: datetime
+        :return:
+        """
+        raise NotImplementedError
+
     def insert(self, project, taskid, obj={}):
         raise NotImplementedError
 
