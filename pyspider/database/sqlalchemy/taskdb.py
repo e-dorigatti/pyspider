@@ -132,6 +132,17 @@ class TaskDB(SplitTableMixin, BaseTaskDB):
             result[status] = count
         return result
 
+    def count_after(self, project, lastcrawltime):
+        if project not in self.projects:
+            self._list_project()
+        if project not in self.projects:
+            return 0
+
+        self.table.name = self._tablename(project)
+        return self.engine.execute(
+            self.table.count(self.table.c.lastcrawltime > lastcrawltime)
+        ).first()[0]
+
     def insert(self, project, taskid, obj={}):
         if project not in self.projects:
             self._list_project()

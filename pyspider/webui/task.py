@@ -29,10 +29,7 @@ def task(taskid):
         result = resultdb.get(project, taskid)
 
     if request.args.get('format', '') == 'json':
-        table = taskdb._tablename(project)
-        after = [x for x in taskdb._select(table, 'count(*)',
-                 'lastcrawltime > %f' % task['lastcrawltime'])]
-        task['tasks_after'] = after[0][0]
+        task['tasks_after'] = taskdb.count_after(project, task['lastcrawltime'])
         return json.jsonify(task)
     else:
         return render_template("task.html", task=task, json=json, result=result,
