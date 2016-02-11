@@ -12,6 +12,7 @@ import six
 import copy
 import time
 import shutil
+import signal
 import logging
 import logging.config
 
@@ -59,6 +60,13 @@ def connect_rpc(ctx, param, value):
     return xmlrpc_client.ServerProxy(value, allow_none=True)
 
 
+def handle_sigusr1(sig, frame):
+    """ Handle a SIGUSR1 by dumping the stack trace
+    """
+    import traceback
+    logging.critical('TRACEBACK\n' + '\n'.join(traceback.format_stack(frame)))
+
+
 @click.group(invoke_without_command=True)
 @click.option('-c', '--config', callback=read_config, type=click.File('r'),
               help='a json file with default values for subcommands. {"webui": {"port":5001}}')
@@ -91,6 +99,8 @@ def cli(ctx, **kwargs):
     """
     A powerful spider system in python.
     """
+    import signal
+    signal.signal(signal.SIGUSR1, handle_sigusr1)
     if kwargs['add_sys_path']:
         sys.path.append(os.getcwd())
 
