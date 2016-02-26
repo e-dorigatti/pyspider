@@ -320,16 +320,45 @@ class Scheduler(object):
 
             scraper_schedule = project.get('scraper_schedule')
             if scraper_schedule:
-                schedule = {'weekdays': range(7), 'days': range(31), 'hours': range(24), 'minutes': range(60)}
+                schedule = {
+                    'weekdays': range(7),
+                    'days': range(31),
+                    'hours': range(24),
+                    'minutes': range(60)
+                }
                 schedule.update(scraper_schedule)
+                for k in schedule:
+                    schedule[k] = set(schedule[k])
 
                 last_start = last_start or dict(lastcrawltime=0, updatetime=0)
                 since_last_start = now - (last_start['lastcrawltime'] or 0)
                 since_last_update = now - (last_start['updatetime'] or 0)
 
-                if (all(value in schedule[key] for key, value in now_dict.iteritems())
-                        and since_last_update > 5 and since_last_start > 60):
-                    self.trigger_on_start(project['name'], schedule={'force_update': True})
+                should_start = False
+                if since_last_start >= 60 and since_last_update > 5:
+                    # check if the scheduler has really ran the scraper
+                    # first, compute the day of the last expected run
+                    for day in xrange(31):
+                        last_required_day = now_dt - datetime.timedelta(days=day)
+                        if (last_required_day.day in schedule['days'] and
+                                last_required_day.weekday() in schedule['weekdays']):
+                            break
+                    else:
+                        continue  # not sure this can happen
+
+                    # then find the exact time
+                    last_required_run = time.mktime(datetime.datetime(
+                        year=last_required_day.year,
+                        month=last_required_day.month,
+                        day=last_required_day.day,
+                        hour=max(schedule['hours']),
+                        minute=max(schedule['minutes'])
+                    ).timetuple())
+
+                    # check if the actual and expected run match (leap seconds ftw!)
+                    if last_required_run - last_start['lastcrawltime'] > 61:
+                        self.trigger_on_start(project['name'],
+                                              schedule={'force_update': True})
 
         return True
 
