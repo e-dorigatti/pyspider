@@ -334,10 +334,20 @@ class Scheduler(object):
                 since_last_start = now - (last_start['lastcrawltime'] or 0)
                 since_last_update = now - (last_start['updatetime'] or 0)
 
-                should_start = False
                 if since_last_start >= 60 and since_last_update > 5:
-                    # check if the scheduler has really ran the scraper
+                    if all(value in schedule[key] for key, value in now_dict.iteritems()):
+                        self.trigger_on_start(project['name'],
+                                              schedule={'force_update': True})
+                        continue
+
+                    # as we do not trust the scheduler, check if it has really ran
+                    # the scraper by "going back in time", finding the last
+                    # time it should have been and compare if it corresponds
+                    # to the actual last run
+
                     # first, compute the day of the last expected run
+                    # unfortunately, both the day number and the weekday have to match
+                    # so we are forced to check each day individually
                     for day in xrange(31):
                         last_required_day = now_dt - datetime.timedelta(days=day)
                         if (last_required_day.day in schedule['days'] and
@@ -346,19 +356,33 @@ class Scheduler(object):
                     else:
                         continue  # not sure this can happen
 
-                    # then find the exact time
+                    # if scheduled today the latest hour cannot be in the future
+                    last_required_hour = max(
+                        (h for h in schedule['hours'] if h <= now_dt.hour)
+                        if day == 0
+                        else schedule['hours']
+                    )
+
+                    # if scheduled today at this hour the minute cannot be in the future
+                    last_required_minute = max(
+                        (m for m in schedule['minutes'] if m <= now_dt.minute)
+                        if day == 0 and last_required_hour == now_dt.hour
+                        else schedule['minutes']
+                    )
+
                     last_required_run = time.mktime(datetime.datetime(
                         year=last_required_day.year,
                         month=last_required_day.month,
                         day=last_required_day.day,
-                        hour=max(schedule['hours']),
-                        minute=max(schedule['minutes'])
+                        hour=last_required_hour,
+                        minute=last_required_minute,
                     ).timetuple())
 
-                    # check if the actual and expected run match (leap seconds ftw!)
+                    # if actual and expected run do not match re-schedule this scraper
                     if last_required_run - last_start['lastcrawltime'] > 61:
                         self.trigger_on_start(project['name'],
                                               schedule={'force_update': True})
+
 
         return True
 
